@@ -1,0 +1,14 @@
+{
+	"domain": "smartmostat",
+	"name": "Smart Thermostat with Price-Based Control",
+	"codeowners": ["@vortitron"],
+	"config_flow": true,
+	"dependencies": [],
+	"documentation": "https://github.com/vortitron/smartmostat",
+	"integration_type": "device",
+	"iot_class": "calculated",
+	"issue_tracker": "https://github.com/vortitron/smartmostat/issues",
+	"requirements": [],
+	"version": "0.2.0"
+}
+

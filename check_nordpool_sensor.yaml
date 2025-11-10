@@ -1,0 +1,54 @@
+# Helper template sensor to validate your Nordpool sensor is correct
+# Add this to configuration.yaml temporarily to check your sensor
+
+template:
+  - sensor:
+      - name: "Nordpool Sensor Validator"
+        unique_id: nordpool_sensor_validator
+        state: >
+          {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS to your sensor #}
+          {% set s = states[sensor] %}
+          {% if s is none %}
+            ❌ Sensor not found
+          {% elif s.attributes.average is defined and s.attributes.raw_today is defined %}
+            ✅ Valid - This sensor will work!
+          {% else %}
+            ❌ Invalid - Missing required attributes
+          {% endif %}
+        attributes:
+          has_current_price: >
+            {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS #}
+            {{ states(sensor) not in ['unknown', 'unavailable'] }}
+          has_average: >
+            {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS #}
+            {{ state_attr(sensor, 'average') is not none }}
+          has_raw_today: >
+            {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS #}
+            {{ state_attr(sensor, 'raw_today') is not none }}
+          has_raw_tomorrow: >
+            {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS #}
+            {{ state_attr(sensor, 'raw_tomorrow') is not none }}
+          hours_available: >
+            {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS #}
+            {% set today = state_attr(sensor, 'raw_today') | default([]) | length %}
+            {% set tomorrow = state_attr(sensor, 'raw_tomorrow') | default([]) | length %}
+            {{ today + tomorrow }} hours of price data
+          recommendation: >
+            {% set sensor = 'sensor.nordpool_kwh_no1_nok' %}  {# CHANGE THIS #}
+            {% set s = states[sensor] %}
+            {% if s is none %}
+              Check the sensor entity ID - it doesn't exist
+            {% elif s.attributes.average is defined and s.attributes.raw_today is defined %}
+              Perfect! Use this sensor in Smart Thermostat configuration.
+            {% else %}
+              Wrong sensor - find one named like 'sensor.nordpool_kwh_<region>_<currency>'
+            {% endif %}
+
+# Usage:
+# 1. Replace 'sensor.nordpool_kwh_no1_nok' with YOUR sensor name (5 places)
+# 2. Add to configuration.yaml
+# 3. Restart Home Assistant
+# 4. Check Developer Tools → States → sensor.nordpool_sensor_validator
+# 5. If state shows "✅ Valid", you're good to go!
+# 6. Remove this after validation
+

@@ -1,0 +1,8 @@
+{
+	"name": "Smart Thermostat with Price-Based Control",
+	"render_readme": true,
+	"domains": ["climate"],
+	"iot_class": "calculated",
+	"homeassistant": "2023.8.0"
+}
+

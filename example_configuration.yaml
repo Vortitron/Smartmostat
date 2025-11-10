@@ -1,0 +1,138 @@
+# Example configuration for Smart Thermostat
+# This integration is configured through the UI, but here are some example automations
+
+# Automation 1: Notify when large adjustment is applied
+automation:
+  - alias: "Smart Thermostat: Notify on Large Adjustment"
+    description: "Send notification when temperature adjustment exceeds 2 degrees"
+    trigger:
+      - platform: state
+        entity_id: climate.smart_thermostat
+        attribute: current_adjustment
+    condition:
+      - condition: template
+        value_template: >
+          {{ (trigger.to_state.attributes.current_adjustment | float | abs) > 2.0 }}
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Smart Thermostat Adjustment"
+          message: >
+            Temperature adjusted by {{ trigger.to_state.attributes.current_adjustment | round(1) }}°C
+            Current price: {{ trigger.to_state.attributes.current_price }} 
+            Average price: {{ trigger.to_state.attributes.average_price }}
+
+# Automation 2: Alert on upcoming expensive period
+automation:
+  - alias: "Smart Thermostat: Alert on Upcoming High Prices"
+    description: "Notify when expensive period is approaching"
+    trigger:
+      - platform: state
+        entity_id: climate.smart_thermostat
+        attribute: next_high_price_in_hours
+    condition:
+      - condition: template
+        value_template: >
+          {{ trigger.to_state.attributes.next_high_price_in_hours | int == 1 }}
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "High Electricity Prices Coming"
+          message: "Expensive period starts in 1 hour. Pre-heating has started."
+
+# Automation 3: Override during guest mode
+automation:
+  - alias: "Smart Thermostat: Disable During Guest Mode"
+    description: "Turn off smart adjustments when guests are present"
+    trigger:
+      - platform: state
+        entity_id: input_boolean.guest_mode
+        to: "on"
+    action:
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.smart_thermostat
+        data:
+          temperature: 21
+      # Disable any further adjustments by setting very conservative thresholds
+      # (This would require options flow reconfiguration)
+
+# Sensor: Track energy savings
+sensor:
+  - platform: template
+    sensors:
+      smart_thermostat_status:
+        friendly_name: "Smart Thermostat Status"
+        value_template: >
+          {% set adj = state_attr('climate.smart_thermostat', 'current_adjustment') | float(0) %}
+          {% if adj < -1 %}
+            Saving Energy (High Prices)
+          {% elif adj > 1 %}
+            Pre-heating (Cheap Prices)
+          {% else %}
+            Normal Operation
+          {% endif %}
+        icon_template: >
+          {% set adj = state_attr('climate.smart_thermostat', 'current_adjustment') | float(0) %}
+          {% if adj < -1 %}
+            mdi:piggy-bank
+          {% elif adj > 1 %}
+            mdi:fire
+          {% else %}
+            mdi:home-thermometer
+          {% endif %}
+
+# Card: Display in Lovelace
+# Add this to your Lovelace dashboard:
+#
+# type: entities
+# title: Smart Thermostat
+# entities:
+#   - entity: climate.smart_thermostat
+#   - type: attribute
+#     entity: climate.smart_thermostat
+#     attribute: base_temperature
+#     name: Base Temperature
+#   - type: attribute
+#     entity: climate.smart_thermostat
+#     attribute: current_adjustment
+#     name: Current Adjustment
+#   - type: attribute
+#     entity: climate.smart_thermostat
+#     attribute: current_price
+#     name: Current Price
+#   - type: attribute
+#     entity: climate.smart_thermostat
+#     attribute: average_price
+#     name: Average Price
+#   - type: attribute
+#     entity: climate.smart_thermostat
+#     attribute: price_ratio
+#     name: Price Ratio
+
+# ApexCharts Card Example (requires apex-charts-card from HACS):
+#
+# type: custom:apexcharts-card
+# header:
+#   show: true
+#   title: Temperature & Price Adjustment
+# series:
+#   - entity: climate.smart_thermostat
+#     name: Target Temperature
+#     attribute: temperature
+#   - entity: climate.smart_thermostat
+#     name: Current Temperature
+#     attribute: current_temperature
+#   - entity: climate.smart_thermostat
+#     name: Adjustment
+#     attribute: current_adjustment
+#     yaxis_id: adjustment
+# yaxis:
+#   - id: temp
+#     min: 15
+#     max: 25
+#   - id: adjustment
+#     opposite: true
+#     min: -3
+#     max: 3
+

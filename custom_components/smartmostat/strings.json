@@ -1,0 +1,113 @@
+{
+	"config": {
+		"step": {
+			"user": {
+				"title": "Configure Smart Thermostat",
+				"description": "Set up a smart thermostat that reacts to live energy prices. ⚠ Requires the HACS Nordpool integration (NOT the built-in HA Nordpool).",
+				"data": {
+					"name": "Name",
+					"control_mode": "Control Strategy",
+					"target_sensor": "Primary Temperature Sensor",
+					"internal_sensor": "Thermostat Internal Sensor (optional)",
+					"outdoor_sensor": "Outdoor Temperature Sensor (optional)",
+					"target_climate": "Thermostat to Control (temperature mode)",
+					"heater": "Heater Switch (tolerance mode)",
+					"cooler": "Cooler Switch (tolerance mode)",
+					"price_sensor": "Electricity Price Sensor (Nordpool)",
+					"max_tolerance": "Maximum Cold Tolerance (°C)",
+					"min_tolerance": "Minimum Tolerance at Average Price (°C)",
+					"max_offset": "Max Positive Temperature Offset (°C)",
+					"min_offset": "Max Negative Temperature Offset (°C)",
+					"heat_offset": "Heat Assist Offset (°C)",
+					"cool_offset": "Cool Assist Offset (°C)",
+					"base_stop_heat_offset": "Base Stop-Heat Offset (°C)",
+					"max_stop_heat_offset": "Maximum Stop-Heat Offset (°C)",
+					"temperature_tolerance": "Comfort Tolerance (°C)",
+					"fan_only_difference": "Fan-only Threshold (°C)",
+					"cool_indoor_threshold": "Indoor Cooling Threshold (°C)",
+					"cool_outdoor_threshold": "Outdoor Cooling Threshold (°C)",
+					"cool_indoor_min": "Minimum Indoor Temp for Cooling (°C)",
+					"enable_fan_only_mode": "Allow Fan-only Mode",
+					"allow_hvac_mode_changes": "Allow HVAC Mode Changes",
+					"enable_diagnostic_logging": "Enable Detailed Diagnostics Logging",
+					"lookahead_hours": "Look-ahead Hours",
+					"preconditioning_enabled": "Enable Pre-conditioning"
+				},
+				"data_description": {
+					"control_mode": "Choose whether to change tolerances (switch control) or nudge a smart thermostat's set-point (temperature control).",
+					"target_sensor": "Sensor that represents the room temperature you care about (e.g. remote probe). Required.",
+					"internal_sensor": "Thermostat's own temperature sensor (if different from remote). Used for offset calculations.",
+					"outdoor_sensor": "Optional outdoor sensor for smarter cooling/heating decisions.",
+					"target_climate": "Thermostat entity whose set-point should be adjusted (used in temperature control mode).",
+					"heater": "Switch or entity that turns the heater on/off (tolerance mode).",
+					"cooler": "Switch or entity that turns the cooler/AC on/off (tolerance mode).",
+					"price_sensor": "Main Nordpool sensor (e.g. sensor.nordpool_kwh_no1_nok). Must expose 'raw_today' attribute.",
+					"max_tolerance": "When energy is expensive the system allows the room to cool/heat by up to this amount before reacting.",
+					"min_tolerance": "Tolerance at average price (the two curves cross here).",
+					"max_offset": "Upper bound for how much the thermostat set-point can be increased (temperature mode).",
+					"min_offset": "Lower bound for how much the thermostat set-point can be decreased (temperature mode).",
+					"heat_offset": "Degrees to add when remote temperature is below desired (temperature mode).",
+					"cool_offset": "Degrees to add when remote is above desired (usually negative to force cooling).",
+					"base_stop_heat_offset": "Offset applied when remote temperature reaches the target.",
+					"max_stop_heat_offset": "Minimum offset when remote is well above target (prevents overshoot).",
+					"temperature_tolerance": "Comfort band around desired temperature before corrective action is taken.",
+					"fan_only_difference": "If the room exceeds desired temperature by this many degrees, fan-only can be used.",
+					"cool_indoor_threshold": "Start cooling if indoor temperature exceeds this threshold.",
+					"cool_outdoor_threshold": "Allow cooling when outdoor temperature is above this value.",
+					"cool_indoor_min": "Minimum indoor temperature before cooling logic engages.",
+					"enable_fan_only_mode": "Use fan-only mode where available to save energy.",
+					"allow_hvac_mode_changes": "Permit Smartmostat to change the HVAC mode on the thermostat (temperature mode).",
+					"enable_diagnostic_logging": "Emit detailed logs and fire metric events for analytics.",
+					"lookahead_hours": "How many hours ahead to scan price data for upcoming expensive periods.",
+					"preconditioning_enabled": "Pre-heat or pre-cool before expensive periods to store thermal energy."
+				}
+			}
+		},
+		"error": {
+			"entity_not_found": "The selected entity could not be found",
+			"invalid_price_sensor": "This sensor doesn't expose hourly price data. Use the HACS Nordpool integration (sensor.nordpool_kwh_*).",
+			"missing_output_device": "Select at least a heater or cooler when using tolerance control mode.",
+			"invalid_control_mode": "The selected control mode is not recognised."
+		},
+		"abort": {
+			"already_configured": "This configuration already exists."
+		}
+	},
+	"options": {
+		"step": {
+			"init": {
+				"title": "Smart Thermostat Options",
+				"description": "Tune how Smart Thermostat behaves.",
+				"data": {
+					"name": "Name",
+					"control_mode": "Control Strategy",
+					"target_sensor": "Primary Temperature Sensor",
+					"internal_sensor": "Thermostat Internal Sensor (optional)",
+					"outdoor_sensor": "Outdoor Temperature Sensor (optional)",
+					"target_climate": "Thermostat to Control (temperature mode)",
+					"heater": "Heater Switch (tolerance mode)",
+					"cooler": "Cooler Switch (tolerance mode)",
+					"price_sensor": "Electricity Price Sensor (Nordpool)",
+					"max_tolerance": "Maximum Cold Tolerance (°C)",
+					"min_tolerance": "Minimum Tolerance at Average Price (°C)",
+					"max_offset": "Max Positive Temperature Offset (°C)",
+					"min_offset": "Max Negative Temperature Offset (°C)",
+					"heat_offset": "Heat Assist Offset (°C)",
+					"cool_offset": "Cool Assist Offset (°C)",
+					"base_stop_heat_offset": "Base Stop-Heat Offset (°C)",
+					"max_stop_heat_offset": "Maximum Stop-Heat Offset (°C)",
+					"temperature_tolerance": "Comfort Tolerance (°C)",
+					"fan_only_difference": "Fan-only Threshold (°C)",
+					"cool_indoor_threshold": "Indoor Cooling Threshold (°C)",
+					"cool_outdoor_threshold": "Outdoor Cooling Threshold (°C)",
+					"cool_indoor_min": "Minimum Indoor Temp for Cooling (°C)",
+					"enable_fan_only_mode": "Allow Fan-only Mode",
+					"allow_hvac_mode_changes": "Allow HVAC Mode Changes",
+					"enable_diagnostic_logging": "Enable Detailed Diagnostics Logging",
+					"lookahead_hours": "Look-ahead Hours",
+					"preconditioning_enabled": "Enable Pre-conditioning"
+				}
+			}
+		}
+	}
+}
