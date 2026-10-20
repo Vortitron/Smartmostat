@@ -1,0 +1,62 @@
+{
+  "entity": {
+    "sensor": {
+      "control_target": {
+        "default": "mdi:thermometer-auto"
+      },
+      "headline": {
+        "default": "mdi:message-text-outline"
+      },
+      "reason": {
+        "default": "mdi:head-lightbulb-outline",
+        "state": {
+          "frost": "mdi:snowflake-alert",
+          "prewarm": "mdi:home-thermometer",
+          "cheap_boost": "mdi:cash-plus",
+          "expensive": "mdi:cash-minus",
+          "shed": "mdi:power-plug-off",
+          "away": "mdi:airplane",
+          "override": "mdi:hand-back-right",
+          "paused": "mdi:pause-circle-outline",
+          "off": "mdi:power"
+        }
+      },
+      "price_level": {
+        "default": "mdi:currency-usd",
+        "state": {
+          "cheap": "mdi:arrow-down-bold",
+          "expensive": "mdi:arrow-up-bold",
+          "super_expensive": "mdi:alert"
+        }
+      },
+      "price_position": {
+        "default": "mdi:percent-outline"
+      },
+      "override_until": {
+        "default": "mdi:timer-sand"
+      }
+    },
+    "switch": {
+      "price_optimisation": {
+        "default": "mdi:chart-line",
+        "state": {
+          "off": "mdi:chart-line-variant"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_override": {
+      "service": "mdi:hand-back-right"
+    },
+    "clear_override": {
+      "service": "mdi:hand-back-right-off"
+    },
+    "resume": {
+      "service": "mdi:play-circle-outline"
+    },
+    "evaluate": {
+      "service": "mdi:refresh"
+    }
+  }
+}

@@ -1,13 +1,4 @@
-# Testing requirements for Smart Thermostat integration
-
-# Core testing framework
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-
-# Home Assistant testing
-homeassistant>=2023.8.0
-
-# Mocking and utilities
-pytest-mock>=3.11.1
-
+# Test requirements for Smartmostat.
+# pytest-homeassistant-custom-component pins a matching Home Assistant release
+# (0.13.316 -> homeassistant 2026.2.3, the newest that runs on Python 3.13).
+pytest-homeassistant-custom-component==0.13.316
