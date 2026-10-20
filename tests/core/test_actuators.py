@@ -8,6 +8,7 @@ from datetime import date, time, timedelta
 import pytest
 
 from custom_components.smartmostat.actuators import (
+	ClimateCommand,
 	DeviceState,
 	Readings,
 	RemoteSensorConfig,
@@ -233,11 +234,25 @@ def test_device_preset_handling() -> None:
 
 def test_setpoint_actuator() -> None:
 	"""0.1.0 behaviour: the control target as the set-point, in heat."""
-	intent = setpoint_intent(21.3, SAM_DEVICE)
+	heating = replace(SAM_DEVICE, hvac_mode="heat", target=20)
+	intent = setpoint_intent(21.3, heating)
+	assert (intent.hvac_mode, intent.temperature) == (None, 21.5)
+	assert diff_climate(intent, heating) == ClimateCommand(None, 21.5, None, "heat")
+	off = replace(SAM_DEVICE, hvac_mode="off", target=20)
+	intent = setpoint_intent(21.3, off)
 	assert (intent.hvac_mode, intent.temperature) == ("heat", 21.5)
-	command = diff_climate(intent, replace(SAM_DEVICE, hvac_mode="off", target=20))
+	command = diff_climate(intent, off)
 	assert command.hvac_mode == "heat" and command.temperature == 21.5
-	assert setpoint_intent(21, SAM_DEVICE, allow_hvac_mode_changes=False).hvac_mode is None
+	assert setpoint_intent(21, off, allow_hvac_mode_changes=False).hvac_mode is None
+
+
+@pytest.mark.parametrize("mode", ["cool", "heat_cool", "auto", "dry", "fan_only"])
+def test_setpoint_actuator_leaves_other_modes_alone(mode: str) -> None:
+	"""Spec 6.2: heat only from off. A device a person put in cooling stays cooling."""
+	device = replace(SAM_DEVICE, hvac_mode=mode, target=24, hvac_modes=("off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"))
+	intent = setpoint_intent(22, device)
+	assert intent.hvac_mode is None and intent.temperature is None
+	assert diff_climate(intent, device) is None
 
 
 # --- switch actuator -----------------------------------------------------------

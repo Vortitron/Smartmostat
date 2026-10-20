@@ -84,6 +84,7 @@ class EngineInputs:
 	switch_state: SwitchState | None = None
 	frost_latched: bool = False
 	room_missing_since: datetime | None = None
+	hands_off: bool = False
 
 
 @dataclass
@@ -184,6 +185,10 @@ def decide(inputs: EngineInputs, cfg: EngineConfig) -> Decision:
 
 	# Smartmostat switched off: turn the device off once, then leave it.
 	if inputs.hvac_mode == HVAC_OFF:
+		if inputs.hands_off:
+			# Upgraded while the device was in a mode this entry cannot drive
+			# (for example cooling): leave the device exactly as it is.
+			return Decision(REASON_OFF, "Off", "Not controlling the device")
 		decision = Decision(REASON_OFF, "Off", "Off")
 		if is_switch:
 			command, _label = switch_intent(control, readings.room, HVAC_OFF, inputs.switch_state or SwitchState(), cfg.switch, now)
@@ -264,11 +269,19 @@ def _switch_decision(
 		cool_control = plan.base_target - plan.current_adjustment
 
 	if readings.room is None:
-		stale = timedelta(minutes=max(0.0, cfg.safety.stale_minutes))
+		# stale_minutes = 0 disables staleness; it must not make the grace period zero.
+		grace = cfg.safety.stale_minutes if cfg.safety.stale_minutes > 0 else SafetyConfig.stale_minutes
+		stale = timedelta(minutes=grace)
 		since = inputs.room_missing_since or now
 		if now - since >= stale:
 			anchor = since + stale
-			if inputs.hvac_mode == HVAC_HEAT and state.heater_on is not None and no_reading_cold(readings.outdoor, True):
+			# Rule 2 (cold outside, or outdoor unknown) and, beyond the spec, any
+			# outdoor temperature below the target: a dead room sensor must neither
+			# leave the heater on for ever nor leave the zone unheated.
+			heat_needed = no_reading_cold(readings.outdoor, True) or (
+				readings.outdoor is not None and readings.outdoor < plan.control_target
+			)
+			if inputs.hvac_mode == HVAC_HEAT and state.heater_on is not None and heat_needed:
 				want = duty_cycle_on(now, anchor)
 				heater, _held = relay_change(state.heater_on, want, state.heater_changed, now, cfg.switch, force=True)
 				command = SwitchCommand(heater, None)

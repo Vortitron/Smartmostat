@@ -46,8 +46,27 @@ A rewrite around the owner's working heat pump automations, generalised. See
   (version 2). Entity ids and unique ids are kept.
 - 0.2.0's default cooling rule (26 °C inside / 25 °C outside) is replaced by the 27 / 27
   rule; migrated temperature-mode entries with the old defaults start with cooling off.
-- `hacs.json` no longer has the retired `domains` key; minimum Home Assistant is 2025.8.
+- `hacs.json` no longer has the retired `domains` key; minimum Home Assistant is 2025.10 (the first release with `async_register_platform_entity_service`).
 - `manifest.json`: integration type `helper`, version 0.3.0.
+- Set-point mode only switches the device to heat when it is off. A device in cool, auto
+  or another mode is left alone, as 0.1.0 never changed the device's mode.
+- On upgrade, a restored mode the new entry does not offer (such as cool) starts
+  Smartmostat off without touching the device, and raises a repair notice until it is
+  turned on again.
+- Migrated 0.1.0 entries take the comfort temperature from `base_temperature` (or the
+  target minus `current_adjustment`), not from the price-shifted target.
+- Switch mode with a dead room sensor: after the stale time the heater duty-cycles (10
+  minutes in every 30) whenever it is not warmer outside than the target, instead of
+  switching off for good. This goes beyond spec rule 2, which only covers cold weather.
+  `stale_minutes = 0` keeps the default 3-hour grace period, and the time the reading went
+  missing survives restarts.
+- Dry run (shadow mode) no longer detects device-side changes, so it never pauses or
+  follows the device to off while other automations drive it.
+- Device reports that match a command Smartmostat sent in the last 15 minutes are treated
+  as late reports of its own commands, not as a person changing the device.
+- The reconfigure flow updates the entry and lets the update listener reload it once
+  (no double reload; avoids the HA 2026.12 break of `async_update_reload_and_abort`).
+- CI also runs the tests against the minimum supported Home Assistant (2025.10.0).
 - Planning notes moved to `docs/history/`.
 
 ### Fixed

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+from unittest.mock import patch
+
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
+import custom_components.smartmostat as smartmostat
 from custom_components.smartmostat.const import DOMAIN
 
 from .conftest import REMOTE_DATA, set_device, set_price, set_room, setup_entry
@@ -154,28 +158,41 @@ async def test_duplicate_device_aborts(sam_house, make_entry) -> None:
 	assert result["reason"] == "already_controlled"
 
 
-async def test_reconfigure(sam_house, make_entry) -> None:
+async def test_reconfigure(sam_house, make_entry, caplog) -> None:
 	"""Change the room sensors and aggregate; the entry reloads."""
 	hass = sam_house
 	set_room(hass, 18, "sensor.bedroom_temperature")
 	entry = make_entry()
 	await setup_entry(hass, entry)
-	result = await entry.start_reconfigure_flow(hass)
-	assert result["step_id"] == "reconfigure"
-	result = await hass.config_entries.flow.async_configure(result["flow_id"], {"control_mode": "remote_sensor"})
-	assert result["step_id"] == "devices"
-	result = await hass.config_entries.flow.async_configure(
-		result["flow_id"],
-		{
-			"target_climate": "climate.sam",
-			"room_sensors": ["sensor.living_room_temperature", "sensor.bedroom_temperature"],
-			"room_aggregate": "min",
-		},
-	)
-	assert result["step_id"] == "price"
-	result = await hass.config_entries.flow.async_configure(result["flow_id"], {"price_sensor": "sensor.nordpool"})
-	await hass.async_block_till_done()
+	original = smartmostat.async_setup_entry
+	setups = 0
+
+	async def counting(hass_: HomeAssistant, entry_) -> bool:
+		nonlocal setups
+		setups += 1
+		return await original(hass_, entry_)
+
+	with patch.object(smartmostat, "async_setup_entry", counting), caplog.at_level(logging.WARNING):
+		result = await entry.start_reconfigure_flow(hass)
+		assert result["step_id"] == "reconfigure"
+		result = await hass.config_entries.flow.async_configure(result["flow_id"], {"control_mode": "remote_sensor"})
+		assert result["step_id"] == "devices"
+		result = await hass.config_entries.flow.async_configure(
+			result["flow_id"],
+			{
+				"target_climate": "climate.sam",
+				"room_sensors": ["sensor.living_room_temperature", "sensor.bedroom_temperature"],
+				"room_aggregate": "min",
+			},
+		)
+		assert result["step_id"] == "price"
+		result = await hass.config_entries.flow.async_configure(result["flow_id"], {"price_sensor": "sensor.nordpool"})
+		await hass.async_block_till_done()
 	assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
+	# Exactly one reload, done by the update listener (HA 2026.10 warns about,
+	# and 2026.12 breaks, async_update_reload_and_abort with a listener).
+	assert setups == 1
+	assert "should use it for scheduling a reload" not in caplog.text
 	assert entry.data["room_sensors"] == ["sensor.living_room_temperature", "sensor.bedroom_temperature"]
 	assert entry.data["room_aggregate"] == "min"
 	assert "outdoor_sensor" not in entry.data  # cleared in the form

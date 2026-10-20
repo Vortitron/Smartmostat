@@ -346,7 +346,11 @@
     },
     "no_readings": {
       "title": "{name}: no temperature readings",
-      "description": "{name} has no usable room or device temperature while it is cold outside, so it is heating on a safety fallback. Check the temperature sensors."
+      "description": "{name} has no usable room or device temperature while heat may be needed, so it is heating on a safety fallback. Check the temperature sensors."
+    },
+    "restored_mode_unsupported": {
+      "title": "{name}: not controlling the device after the upgrade",
+      "description": "Before the upgrade, {name} was in {mode}, a mode this entry does not offer. To avoid changing a working device, {name} started switched off and is leaving the device alone (the frost guard still applies). Turn {name} on to let it take control again, or reconfigure it with a mode that suits the device."
     }
   }
 }

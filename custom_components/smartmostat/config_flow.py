@@ -424,7 +424,12 @@ class SmartmostatConfigFlow(ConfigFlow, domain=DOMAIN):
 				self._data[CONF_PRICE_SENSOR] = entity_id
 				if self.source == SOURCE_RECONFIGURE:
 					entry = self._get_reconfigure_entry()
-					return self.async_update_reload_and_abort(entry, data=self._data)
+					# The update listener in __init__.py reloads on a data change.
+					# (async_update_reload_and_abort would reload a second time, which
+					# HA 2026.10 reports and 2026.12 rejects; ConfigFlow only gained
+					# async_update_and_abort after 2025.10, the minimum we support.)
+					self.hass.config_entries.async_update_entry(entry, data=self._data)
+					return self.async_abort(reason="reconfigure_successful")
 				return await self.async_step_comfort()
 		default = self._data.get(CONF_PRICE_SENSOR) or self._detect_price_sensor()
 		key = vol.Required(CONF_PRICE_SENSOR, default=default) if default else vol.Required(CONF_PRICE_SENSOR)

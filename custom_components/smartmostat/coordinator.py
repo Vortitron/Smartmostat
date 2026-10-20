@@ -35,6 +35,8 @@ from .actuators import ClimateCommand, DeviceState, Readings, SwitchCommand, Swi
 from .const import (
 	AGGREGATE_MEAN,
 	AGGREGATE_MIN,
+	ATTR_BASE_TEMPERATURE,
+	ATTR_CURRENT_ADJUSTMENT,
 	COMMAND_TIMEOUT_SECONDS,
 	CONF_COMFORT_TEMPERATURE,
 	CONF_PRICE_OPTIMISATION,
@@ -48,6 +50,7 @@ from .const import (
 	HVAC_OFF,
 	LIVE_OPTION_KEYS,
 	MODE_SWITCH,
+	OWN_COMMAND_MEMORY_MINUTES,
 	PRESET_SCHEDULE,
 	PRESETS,
 	REASON_FALLBACK,
@@ -121,6 +124,11 @@ class SmartmostatController:
 		self.room_missing_since: datetime | None = None
 		self.had_stored_state = False
 		self.restored_target: float | None = None
+		# Set when an upgrade restored a mode this entry cannot drive (section 9).
+		self.hands_off: str | None = None
+		# What we actually sent recently, so a late report of our own earlier
+		# command is not mistaken for a person (section 5.5).
+		self._sent: list[tuple[datetime, dict[str, Any]]] = []
 
 		# Last evaluation.
 		self.decision: Decision | None = None
@@ -184,6 +192,10 @@ class SmartmostatController:
 		expected = stored.get("expected")
 		if isinstance(expected, dict):
 			self.expected = expected
+		hands_off = stored.get("hands_off")
+		if isinstance(hands_off, str) and self.hvac_mode == HVAC_OFF:
+			self.hands_off = hands_off
+		self.room_missing_since = _parse_dt(stored.get("room_missing_since"))
 
 	def apply_restored_state(self, state: State | None) -> None:
 		"""First start after an upgrade: take mode, preset and target from the old entity."""
@@ -193,10 +205,38 @@ class SmartmostatController:
 			self.hvac_mode = state.state
 			if state.state != HVAC_OFF:
 				self.last_on_mode = state.state
+		elif state.state not in UNUSABLE:
+			# 0.1.0 and 0.2.0 offered the device's own modes (cool, auto, ...).
+			# Turning that into heat would change a working device on upgrade,
+			# so start off, leave the device alone and say why.
+			_LOGGER.warning(
+				"%s: restored mode %s is not offered by this entry; not controlling the device until it is turned on",
+				self.settings.name,
+				state.state,
+			)
+			self.hvac_mode = HVAC_OFF
+			self.hands_off = str(state.state)
 		preset = state.attributes.get("preset_mode")
 		if preset in PRESETS:
 			self.preset = preset
-		self.restored_target = _float(state.attributes.get(ATTR_TEMPERATURE))
+		self.restored_target = self._restored_comfort(state)
+
+	@staticmethod
+	def _restored_comfort(state: State) -> float | None:
+		"""The user's own target from the old entity.
+
+		0.1.0's ``temperature`` was base + current_adjustment (the price-shifted
+		value); the user's setting was published as ``base_temperature``.
+		"""
+		attrs = state.attributes
+		base = _float(attrs.get(ATTR_BASE_TEMPERATURE))
+		if base is not None:
+			return base
+		target = _float(attrs.get(ATTR_TEMPERATURE))
+		adjustment = _float(attrs.get(ATTR_CURRENT_ADJUSTMENT))
+		if target is not None and adjustment is not None:
+			return round(target - adjustment, 2)
+		return target
 
 	def _state_to_save(self) -> dict[str, Any]:
 		return {
@@ -213,6 +253,8 @@ class SmartmostatController:
 			"frost_latched": self.frost_latched,
 			"shed_latched": self.shed_latched,
 			"expected": self.expected,
+			"hands_off": self.hands_off,
+			"room_missing_since": self.room_missing_since.isoformat() if self.room_missing_since else None,
 		}
 
 	def _save(self) -> None:
@@ -330,6 +372,9 @@ class SmartmostatController:
 
 	def _detect_device_change(self, entity_id: str, old: State, new: State) -> None:
 		"""Section 5.5: respect a person using the remote or the vendor app."""
+		if self.settings.dry_run:
+			# Shadow mode: something else (sam.yaml) drives the device.
+			return
 		if new.state in UNUSABLE or old.state in UNUSABLE or not self.expected:
 			return
 		now = dt_util.utcnow()
@@ -337,12 +382,15 @@ class SmartmostatController:
 			return
 		if self.hvac_mode == HVAC_OFF:
 			return
+		recent = self._recent_sent(now)
 		if self.settings.mode == MODE_SWITCH:
 			key = "heater" if entity_id == self.settings.heater else "cooler"
 			want = self.expected.get(key)
 			now_on = self._switch_is_on(new)
 			if want is None or now_on == want or self._switch_is_on(old) == now_on:
 				return
+			if any(sent.get(key) == now_on for sent in recent):
+				return  # a late report of our own command
 			self._pause(now, f"{entity_id} switched {'on' if now_on else 'off'}")
 			return
 		want_mode = self.expected.get("hvac_mode")
@@ -357,6 +405,18 @@ class SmartmostatController:
 			and abs(new_temp - float(want_temp)) >= step / 2
 			and (old_temp is None or abs(new_temp - old_temp) >= step / 2)
 		)
+		# A late report of a command we sent earlier is not a person.
+		if mode_changed and any(new.state in (sent.get("hvac_mode"), sent.get("target_mode")) for sent in recent):
+			mode_changed = False
+		if (
+			temp_changed
+			and new_temp is not None
+			and any(
+				sent.get("temperature") is not None and abs(new_temp - float(sent["temperature"])) < step / 2
+				for sent in recent
+			)
+		):
+			temp_changed = False
 		if not (mode_changed or temp_changed):
 			return
 		if mode_changed and new.state == HVAC_OFF:
@@ -366,6 +426,12 @@ class SmartmostatController:
 			self._save()
 			return
 		self._pause(now, f"device changed to {new.state} {new_temp}")
+
+	def _recent_sent(self, now: datetime) -> list[dict[str, Any]]:
+		"""Commands sent within OWN_COMMAND_MEMORY_MINUTES (older ones are forgotten)."""
+		cutoff = now - timedelta(minutes=OWN_COMMAND_MEMORY_MINUTES)
+		self._sent = [(at, sent) for at, sent in self._sent if at >= cutoff]
+		return [sent for _at, sent in self._sent]
 
 	def _pause(self, now: datetime, why: str) -> None:
 		minutes = self.settings.override_minutes
@@ -388,8 +454,16 @@ class SmartmostatController:
 		if mode != HVAC_OFF:
 			self.last_on_mode = mode
 			self.paused_until = None
+			self._clear_hands_off()
 		self._save()
 		await self.async_evaluate(user_action=True)
+
+	@callback
+	def _clear_hands_off(self) -> None:
+		if self.hands_off is None:
+			return
+		self.hands_off = None
+		ir.async_delete_issue(self.hass, DOMAIN, f"restored_mode_unsupported_{self.entry.entry_id}")
 
 	async def async_turn_on(self) -> None:
 		"""Back to the last on mode."""
@@ -416,6 +490,7 @@ class SmartmostatController:
 			if hvac_mode != HVAC_OFF:
 				self.last_on_mode = hvac_mode
 				self.paused_until = None
+				self._clear_hands_off()
 			self._save()
 		if temperature is None:
 			await self.async_evaluate(user_action=True)
@@ -754,6 +829,7 @@ class SmartmostatController:
 			switch_state=self.switch_state() if s.mode == MODE_SWITCH else None,
 			frost_latched=self.frost_latched,
 			room_missing_since=self.room_missing_since,
+			hands_off=self.hands_off is not None and self.hvac_mode == HVAC_OFF,
 		)
 		decision = decide(inputs, s.engine)
 		self.frost_latched = decision.frost
@@ -793,6 +869,10 @@ class SmartmostatController:
 				self.entry.async_create_task(self.hass, self._send_climate(command), "smartmostat command")
 			elif isinstance(command, SwitchCommand):
 				self.entry.async_create_task(self.hass, self._send_switch(command), "smartmostat switch")
+			if not s.dry_run:
+				sent_at = dt_util.utcnow()
+				self._recent_sent(sent_at)
+				self._sent.append((sent_at, {**command.as_dict(), "target_mode": getattr(command, "target_mode", None)}))
 			self.expected_at = dt_util.utcnow()
 
 		# What the device should report from now on (for device-change detection).
@@ -876,6 +956,16 @@ class SmartmostatController:
 			)
 		else:
 			ir.async_delete_issue(self.hass, DOMAIN, f"no_readings_{entry_id}")
+		if self.hands_off is not None and self.hvac_mode == HVAC_OFF:
+			ir.async_create_issue(
+				self.hass,
+				DOMAIN,
+				f"restored_mode_unsupported_{entry_id}",
+				is_fixable=False,
+				severity=ir.IssueSeverity.WARNING,
+				translation_key="restored_mode_unsupported",
+				translation_placeholders={**placeholders, "mode": self.hands_off},
+			)
 
 	@callback
 	def _fire_event(self, decision: Decision, inputs: EngineInputs) -> None:

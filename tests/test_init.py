@@ -8,6 +8,7 @@ from pathlib import Path
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.translation import async_get_translations
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_restore_cache
@@ -15,7 +16,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_r
 from custom_components.smartmostat import diagnostics
 from custom_components.smartmostat.const import DOMAIN, REASONS
 
-from .conftest import set_room, setup_entry
+from .conftest import set_device, set_room, setup_entry
 
 COMPONENT = Path(__file__).parent.parent / "custom_components" / DOMAIN
 
@@ -236,3 +237,64 @@ async def test_remove_entry_cleans_storage(sam_house, make_entry, hass_storage) 
 	await hass.config_entries.async_remove(entry.entry_id)
 	await hass.async_block_till_done()
 	assert f"{DOMAIN}.{entry.entry_id}" not in hass_storage
+
+
+@pytest.mark.parametrize(
+	("attrs", "comfort"),
+	[
+		# 0.1.0 in an expensive hour: temperature = base + adjustment.
+		({"temperature": 19.5, "base_temperature": 21.5, "current_adjustment": -2.0}, 21.5),
+		# No base_temperature attribute: undo the adjustment.
+		({"temperature": 22.5, "current_adjustment": 1.0}, 21.5),
+	],
+)
+async def test_migrate_v1_comfort_is_the_users_setting(sam_house, attrs, comfort) -> None:
+	"""The restored comfort is what the user asked for, not the price-shifted target."""
+	hass = sam_house
+	entry = _old_entry(hass, 1, V1_DATA, unique_id="climate.sam_smartmostat")
+	_register_old_climate(hass, entry, "climate.smart_thermostat")
+	mock_restore_cache(hass, [State("climate.smart_thermostat", "heat", attrs)])
+	await setup_entry(hass, entry)
+	assert entry.options["comfort_temperature"] == comfort
+
+
+async def test_migrate_v1_device_in_cool_is_left_alone(sam_house, climate_calls) -> None:
+	"""0.1.0 mirrored the device's modes; a cooling device must not be switched to heat."""
+	hass = sam_house
+	set_device(hass, "cool", temperature=24)
+	entry = _old_entry(hass, 1, V1_DATA, unique_id="climate.sam_smartmostat")
+	_register_old_climate(hass, entry, "climate.smart_thermostat")
+	mock_restore_cache(
+		hass, [State("climate.smart_thermostat", "cool", {"temperature": 24, "base_temperature": 24, "current_adjustment": 0})]
+	)
+	await setup_entry(hass, entry)
+	state = hass.states.get("climate.smart_thermostat")
+	assert state.state == "off"
+	assert not any(climate_calls.values())
+	issue_id = f"restored_mode_unsupported_{entry.entry_id}"
+	issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+	assert issue is not None and issue.translation_placeholders["mode"] == "cool"
+	# Still hands off after a restart (stored state).
+	assert await hass.config_entries.async_reload(entry.entry_id)
+	await hass.async_block_till_done()
+	assert hass.states.get("climate.smart_thermostat").state == "off"
+	assert not any(climate_calls.values())
+	# Turning it on takes control; in setpoint mode a cooling device is still left alone.
+	await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": "climate.smart_thermostat", "hvac_mode": "heat"}, blocking=True)
+	await hass.async_block_till_done()
+	assert hass.states.get("climate.smart_thermostat").state == "heat"
+	assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+	assert climate_calls["set_hvac_mode"] == []
+
+
+async def test_migrate_v2_temperature_entry_in_cool_is_left_alone(sam_house, climate_calls) -> None:
+	"""0.2.0 offered cool; with cooling off after migration the device must not be set to heat."""
+	hass = sam_house
+	set_device(hass, "cool", temperature=24)
+	entry = _old_entry(hass, 2, V2_TEMPERATURE)
+	_register_old_climate(hass, entry, "climate.living_room")
+	mock_restore_cache(hass, [State("climate.living_room", "cool", {"temperature": 21})])
+	await setup_entry(hass, entry)
+	assert hass.states.get("climate.living_room").state == "off"
+	assert hass.states.get("sensor.living_room_headline").state == "Off · Not controlling the device"
+	assert not any(climate_calls.values())

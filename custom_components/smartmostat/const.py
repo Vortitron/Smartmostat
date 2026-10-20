@@ -196,6 +196,9 @@ DUTY_ON_MINUTES: Final = 10
 DUTY_PERIOD_MINUTES: Final = 30
 RATE_LIMIT_SECONDS: Final = 60
 DEVICE_CHANGE_GRACE_SECONDS: Final = 30
+# A device report matching anything we sent this recently is our own command
+# arriving late (polled cloud integrations), not a person.
+OWN_COMMAND_MEMORY_MINUTES: Final = 15
 SENSOR_DEBOUNCE_SECONDS: Final = 30
 WATCHDOG_MINUTES: Final = 5
 STARTUP_DELAY_SECONDS: Final = 30

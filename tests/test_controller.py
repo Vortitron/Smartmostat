@@ -441,3 +441,76 @@ async def test_two_entries_independent(sam_house, make_entry) -> None:
 	assert hass.states.get("climate.living_room") is not None
 	assert hass.states.get("climate.bedroom") is not None
 	assert first.runtime_data is not second.runtime_data
+
+
+async def test_dry_run_does_not_pause_when_something_else_moves_the_device(sam_house, make_entry, climate_calls, freezer) -> None:
+	"""Shadow mode: sam.yaml keeps commanding the device; the shadow keeps deciding."""
+	hass = sam_house
+	await setup_entry(hass, make_entry(options={"dry_run": True}))
+	assert hass.states.get("sensor.living_room_reason").state == "cheap_boost"
+	await advance(hass, freezer, 60)
+	set_device(hass, temperature=23.5)  # sam.yaml's own set-point
+	await hass.async_block_till_done()
+	assert hass.states.get("sensor.living_room_reason").state == "cheap_boost"
+
+
+async def test_dry_run_does_not_follow_the_device_off(sam_house, make_entry, climate_calls, freezer) -> None:
+	"""Shadow mode: sam.yaml's shed turning the device off does not switch the shadow off."""
+	hass = sam_house
+	await setup_entry(hass, make_entry(options={"dry_run": True}))
+	await advance(hass, freezer, 60)
+	set_device(hass, "off")
+	await hass.async_block_till_done()
+	await advance(hass, freezer, 3600)
+	set_device(hass, "heat")
+	await hass.async_block_till_done()
+	await advance(hass, freezer, 600)
+	assert hass.states.get("climate.living_room").state == "heat"
+	assert climate_calls["set_temperature"] == [] and climate_calls["set_hvac_mode"] == []
+
+
+async def test_late_report_of_our_own_command_is_not_a_person(sam_house, make_entry, climate_calls, freezer) -> None:
+	"""A polled cloud device reporting our earlier command late must not pause control."""
+	hass = sam_house
+	await setup_entry(hass, make_entry())
+	assert last(climate_calls["set_temperature"])["temperature"] == 24
+	# The device has not reported 24 yet; the room moves and the intent becomes 22,
+	# which the stale device state already shows, so nothing is sent.
+	await advance(hass, freezer, 61)
+	set_room(hass, 17)
+	await hass.async_block_till_done()
+	await advance(hass, freezer, 31)
+	await evaluate(hass)
+	# 40 s later the poll finally reports the first command.
+	await advance(hass, freezer, 40)
+	set_device(hass, temperature=24)
+	await hass.async_block_till_done()
+	assert hass.states.get("sensor.living_room_reason").state != "paused"
+	# A person choosing a value we never sent still pauses.
+	await advance(hass, freezer, 120)
+	set_device(hass, temperature=27)
+	await hass.async_block_till_done()
+	assert hass.states.get("sensor.living_room_reason").state == "paused"
+
+
+async def test_switch_room_missing_since_survives_a_restart(stockholm, make_entry, freezer) -> None:
+	"""The no-reading clock is persisted, so a restart does not reset the grace period."""
+	hass = stockholm
+	hass.states.async_set("switch.heater", "on")
+	hass.states.async_set("sensor.bedroom_temperature", "unavailable")
+	set_price(hass)
+	data = {
+		"name": "Bedroom",
+		"control_mode": "switch",
+		"heater": "switch.heater",
+		"price_sensor": "sensor.nordpool",
+		"room_sensors": ["sensor.bedroom_temperature"],
+	}
+	entry = make_entry(data=data, options={"comfort_temperature": 20})
+	await setup_entry(hass, entry)
+	since = entry.runtime_data.room_missing_since
+	assert since is not None
+	await advance(hass, freezer, 600)
+	assert await hass.config_entries.async_reload(entry.entry_id)
+	await hass.async_block_till_done()
+	assert entry.runtime_data.room_missing_since == since

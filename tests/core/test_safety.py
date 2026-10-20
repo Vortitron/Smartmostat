@@ -153,9 +153,10 @@ def test_switch_duty_cycle_without_reading() -> None:
 	)
 	assert off_phase.command.heater_on is False and off_phase.action == "Heater off (duty cycle)"
 	warm_out = decide(
-		inputs(MODE_SWITCH, readings=Readings(room=None, outdoor=12), room_missing_since=NOW - timedelta(hours=4), switch_state=replace(SWITCH_STATE, heater_on=True)),
+		inputs(MODE_SWITCH, readings=Readings(room=None, outdoor=22), room_missing_since=NOW - timedelta(hours=4), switch_state=replace(SWITCH_STATE, heater_on=True)),
 		cfg(MODE_SWITCH),
 	)
+	# Warmer outside than the target: no heat is needed, so off is safe.
 	assert warm_out.command.heater_on is False and warm_out.reason != REASON_FALLBACK
 	assert duty_cycle_on(NOW, NOW) and duty_cycle_on(NOW + timedelta(minutes=9), NOW)
 	assert not duty_cycle_on(NOW + timedelta(minutes=10), NOW)
@@ -218,3 +219,53 @@ def test_status_line_and_change_key() -> None:
 		assert part in line
 	assert isinstance(decision, Decision)
 	assert decision.change_key() == decide(snapshot, cfg()).change_key()
+
+
+def test_switch_without_reading_never_leaves_a_mild_zone_unheated() -> None:
+	"""A dead room sensor at 3 to 10 C outside: duty cycle, not off for ever."""
+	on = replace(SWITCH_STATE, heater_on=True, heater_changed=NOW - timedelta(hours=2))
+	readings = Readings(room=None, outdoor=5)
+	held = decide(inputs(MODE_SWITCH, readings=readings, room_missing_since=NOW - timedelta(minutes=10), switch_state=on), cfg(MODE_SWITCH))
+	assert held.command is None and held.action == "Heater on (no reading)"
+	# 181 minutes missing with stale_minutes 180: one minute into the duty cycle.
+	stale = decide(inputs(MODE_SWITCH, readings=readings, room_missing_since=NOW - timedelta(minutes=181), switch_state=on), cfg(MODE_SWITCH))
+	assert stale.reason == REASON_FALLBACK and stale.command is None and stale.action == "Heater on (duty cycle)"
+	# The off phase comes round, and so does the next on phase.
+	off_phase = decide(inputs(MODE_SWITCH, readings=readings, room_missing_since=NOW - timedelta(minutes=195), switch_state=on), cfg(MODE_SWITCH))
+	assert off_phase.command.heater_on is False and off_phase.reason == REASON_FALLBACK
+	off = replace(on, heater_on=False)
+	next_on = decide(inputs(MODE_SWITCH, readings=readings, room_missing_since=NOW - timedelta(minutes=211), switch_state=off), cfg(MODE_SWITCH))
+	assert next_on.command.heater_on is True
+
+
+def test_switch_stale_minutes_zero_keeps_a_grace_period() -> None:
+	"""stale_minutes = 0 disables staleness; a sensor blip must not switch the heater off."""
+	on = replace(SWITCH_STATE, heater_on=True, heater_changed=NOW - timedelta(hours=2))
+	blip = decide(
+		inputs(MODE_SWITCH, readings=Readings(room=None, outdoor=5), room_missing_since=NOW, switch_state=on),
+		cfg(MODE_SWITCH, stale_minutes=0),
+	)
+	assert blip.command is None and blip.reason != REASON_FALLBACK and blip.action == "Heater on (no reading)"
+
+
+def test_off_hands_off_sends_nothing() -> None:
+	"""An upgrade that restored an unsupported mode: off, but the device is left alone."""
+	cooling = replace(DEVICE, hvac_mode="cool", target=24, hvac_modes=("off", "heat", "cool"))
+	plain_off = decide(inputs(hvac_mode="off", device=cooling), cfg())
+	assert plain_off.command is not None and plain_off.command.hvac_mode == "off"
+	hands_off = decide(inputs(hvac_mode="off", device=cooling, hands_off=True), cfg())
+	assert hands_off.reason == REASON_OFF and hands_off.command is None and hands_off.intent is None
+	# The frost guard still applies.
+	frost = decide(inputs(hvac_mode="off", device=cooling, hands_off=True, readings=Readings(room=3, internal=3)), cfg())
+	assert frost.reason == REASON_FROST and frost.command.hvac_mode == "heat"
+
+
+def test_setpoint_mode_leaves_a_cooling_device_alone() -> None:
+	"""The reviewer's probe: setpoint mode, device in cool, warm room and outdoor."""
+	for mode in ("cool", "heat_cool", "auto"):
+		device = DeviceState(hvac_mode=mode, target=24, current=26, hvac_modes=("off", "heat", "cool", "heat_cool", "auto"))
+		decision = decide(
+			inputs(MODE_SETPOINT, device=device, readings=Readings(room=26, outdoor=28), plan=Plan(22, 22, REASON_COMFORT, "c")),
+			cfg(MODE_SETPOINT),
+		)
+		assert decision.command is None, mode

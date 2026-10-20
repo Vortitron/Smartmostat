@@ -26,7 +26,7 @@ integration:
 
 ## Requirements
 
-- Home Assistant 2025.8 or newer.
+- Home Assistant 2025.10 or newer.
 - A price sensor with `raw_today` / `raw_tomorrow` (or `today` / `tomorrow`) attributes: the
   [HACS Nordpool](https://github.com/custom-components/nordpool) integration. The built-in
   Nord Pool integration does not expose these attributes. 15-minute and hourly prices both
@@ -53,7 +53,7 @@ Then go to **Settings > Devices & services > Add integration > Smartmostat**.
 | Mode | Use it for | What Smartmostat sends |
 |---|---|---|
 | **Remote sensor** | Heat pumps and air conditioners whose own sensor is in the wrong place | Mode and a set-point computed from the unit's own reading, so it heats to the room sensor |
-| **Set-point** | Any thermostat that measures the room well itself (radiator valves, underfloor) | The control target as its set-point |
+| **Set-point** | Any thermostat that measures the room well itself (radiator valves, underfloor) | The control target as its set-point while the device heats. It switches the device to heat only from off; a device someone put in cool, auto or another mode is left alone |
 | **Switch** | A heater or cooler on a relay, smart plug or `input_boolean` | On and off with hysteresis around the control target |
 
 Everything else (price logic, schedule, presets, overrides and safety) is the same in all
@@ -170,6 +170,11 @@ and out.
 On at `D - hysteresis`, off at `D + hysteresis`, with a minimum on/off time (5 minutes). A
 cooler mirrors it in *Cool* mode.
 
+If the room sensor stops reporting, the relay keeps its state for the stale time (3 hours,
+also when staleness is disabled). After that the heater runs 10 minutes in every 30 until a
+reading returns, unless it is warmer outside than the target, in which case it stays off. A
+dead sensor therefore never leaves the heater on, or the room unheated, indefinitely.
+
 ## Overrides and changes on the device
 
 - Setting the temperature of the Smartmostat thermostat while a comfort period is configured
@@ -181,14 +186,16 @@ cooler mirrors it in *Cool* mode.
 - If someone changes the **device itself** (its remote or app), Smartmostat **pauses** for the
   override length instead of overwriting them. `smartmostat.resume` ends the pause early. If
   the device is switched **off** by hand, Smartmostat turns itself off too; turn it back on to
-  resume.
+  resume. A report that matches something Smartmostat itself sent in the last 15 minutes
+  counts as its own command arriving late (slow cloud integrations), not as a person.
 
 ## Safety
 
 - **Frost guard:** below the frost temperature (5 °C) Smartmostat heats to at least 8 °C,
   even when it is switched off, paused or shedding, and raises a repair notice if it was off.
 - **No readings while it is cold:** with no room or device reading and below 3 °C outside,
-  climate devices heat at the control target; switches run 10 minutes in every 30.
+  climate devices heat at the control target; switches run 10 minutes in every 30 (see
+  [Switch mode](#switch-mode) for milder weather).
 - **Super-expensive shed** (optional): turns the device off above a price you set, but only
   with a room reading above 19 °C. An override or the away preset beats it.
 - **Stale sensors:** a sensor silent for 3 hours counts as unavailable.
@@ -285,17 +292,23 @@ trend baseline. Leave *Cooling* off in Smartmostat while those automations handl
 Before switching over, run Smartmostat in **shadow mode** (*Advanced > Dry run*) beside the
 old automations for a couple of days, on a test instance or with the owner's agreement:
 commands are logged instead of sent, so the headline and control target can be compared
-with what the YAML did.
+with what the YAML did. In dry run Smartmostat does not watch for changes on the device (the
+old automations are still driving it), so it never pauses or follows the device to off.
 
 ## Upgrading from 0.1.0 or 0.2.0
 
 | Was | Becomes |
 |---|---|
-| 0.1.0 (wrap a climate, shift its set-point) | *Set-point* mode. `max_increase` becomes the cheap boost, `max_decrease` the expensive cut, the price thresholds the cheap and expensive ratios. The comfort temperature is taken from the old thermostat's last target |
+| 0.1.0 (wrap a climate, shift its set-point) | *Set-point* mode. `max_increase` becomes the cheap boost, `max_decrease` the expensive cut, the price thresholds the cheap and expensive ratios. The comfort temperature is your own setting from the old thermostat (its `base_temperature`, not the price-shifted target) |
 | 0.2.0 *temperature* mode | *Remote sensor* mode with the same offsets. The old default cooling rule (26 °C inside / 25 °C outside) is replaced by the safer 27 / 27 rule and cooling starts switched off; customised cooling thresholds are kept and cooling stays on |
 | 0.2.0 *tolerance* mode | *Switch* mode. Minimum and maximum tolerance `a` and `b` become hysteresis `(a + b) / 2` and boost/cut `(b - a) / 2`, which gives exactly the same on and off temperatures at the cheapest and dearest prices |
 
 Entity ids, unique ids and history are kept.
+
+0.1.0 and 0.2.0 offered the device's own modes. If the old thermostat was in a mode the new
+entry does not offer (for example *Cool* on a set-point entry, or on a remote-sensor entry
+with cooling off), Smartmostat starts **off** and leaves the device exactly as it is, with a
+repair notice. Turn Smartmostat on when you want it to take control again.
 
 ## Troubleshooting
 

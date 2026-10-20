@@ -203,9 +203,21 @@ def remote_sensor_intent(
 def setpoint_intent(
 	control: float, device: DeviceState, allow_hvac_mode_changes: bool = True
 ) -> ClimateIntent:
-	"""Section 6.2: tell the device the control target directly (0.1.0)."""
-	mode = HVAC_HEAT if allow_hvac_mode_changes else None
-	return ClimateIntent(mode, round_setpoint(control, device), f"Set {round_setpoint(control, device):g}°C")
+	"""Section 6.2: tell the device the control target directly (0.1.0).
+
+	Heat is only requested when the device is off. A device in heat gets the
+	set-point. A device in any other mode (cool, auto, heat_cool, dry,
+	fan_only) was put there by a person or another automation; the control
+	target is a heating target, so it is left alone, as 0.1.0 never changed
+	the device's mode.
+	"""
+	setpoint = round_setpoint(control, device)
+	if device.hvac_mode == HVAC_OFF:
+		mode = HVAC_HEAT if allow_hvac_mode_changes else None
+		return ClimateIntent(mode, setpoint, f"Set {setpoint:g}°C")
+	if device.hvac_mode == HVAC_HEAT:
+		return ClimateIntent(None, setpoint, f"Set {setpoint:g}°C")
+	return ClimateIntent(None, None, f"Device in {device.hvac_mode}, left alone")
 
 
 def heat_intent(target: float, device: DeviceState, label: str) -> ClimateIntent:

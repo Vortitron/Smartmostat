@@ -17,6 +17,10 @@ uv pip install -r requirements_test.txt
 pytest -q
 ```
 
+CI also runs the suite against the oldest supported Home Assistant (the `homeassistant`
+minimum in `hacs.json`) using `requirements_test_min.txt`. Raise both together when the
+code starts using a newer API.
+
 To try it in a real instance, link or copy `custom_components/smartmostat` into your Home
 Assistant `config/custom_components/` folder and restart. Please use a test instance, not a
 production house.
