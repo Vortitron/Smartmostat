@@ -2,18 +2,24 @@ name: HACS Validation
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
 
 jobs:
-  validate:
+  hacs:
+    name: HACS
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: HACS Validation
+      - name: HACS validation
         uses: hacs/action@main
         with:
           category: integration
-
+          # Brands: no home-assistant/brands entry yet (optional for custom
+          # integrations). Topics: must be set by the owner in the GitHub
+          # repository settings; remove "topics" here once they are added.
+          ignore: brands topics
