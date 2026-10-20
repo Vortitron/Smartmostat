@@ -1,0 +1,39 @@
+set_override:
+  target:
+    entity:
+      integration: smartmostat
+      domain: climate
+  fields:
+    temperature:
+      required: true
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    minutes:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10080
+          unit_of_measurement: min
+
+clear_override:
+  target:
+    entity:
+      integration: smartmostat
+      domain: climate
+
+resume:
+  target:
+    entity:
+      integration: smartmostat
+      domain: climate
+
+evaluate:
+  target:
+    entity:
+      integration: smartmostat
+      domain: climate

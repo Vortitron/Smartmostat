@@ -1,396 +1,339 @@
-# Smart Thermostat (Smartmostat)
+# Smartmostat
 
-A Home Assistant custom integration that dynamically adjusts thermostat temperature targets based on electricity prices, helping you save money whilst maintaining comfort.
+Price-aware heating for Home Assistant. Smartmostat gives you one thermostat per room that
+you set like any other, while it decides what the real heat pump, thermostat or heater is
+told, using your electricity price (HACS Nordpool) and, optionally, a room sensor.
 
-## Features
+It is the owner's year of hand-tuned heat pump automations, generalised into one
+integration:
 
-- **Dual Control Modes**: Choose between tolerance-based switch control or smart set-point adjustments
-- **Remote Sensor Support**: Combine internal, external, and outdoor sensors for accurate comfort management
-- **Price-aware Comfort**: Reacts to live electricity prices and looks ahead to expensive periods
-- **Pre-heating/Pre-cooling**: Build thermal mass before price spikes to coast through expensive hours
-- **Granular Behaviour Tuning**: Configure offsets, fan-only behaviour, thresholds, logging, and more
-- **Multiple Instances**: Run separate profiles for every room, thermostat, or heat pump
-- **Nordpool Ready**: Built to work with the HACS Nordpool integration's hourly data
-- **HACS Compatible**: Simple installation and updates via Home Assistant Community Store
+- **Two numbers.** The temperature you asked for (the *base target*) and a price-adjusted
+  *control target*. You see the first; the device is steered by the second.
+- **Cheap means cheap twice.** Power only counts as cheap when it is cheaper than the coming
+  hours *and* genuinely cheap for the day (at most half the day's average, or in the cheaper
+  half of the day's hours). Expensive likewise needs both. This stops the classic mistake of
+  heating hard on the run-up into a price peak.
+- **Pre-warm before you need it, not at 03:00.** With a daily comfort period (say 19:00 to
+  23:00), cheap power before it is used to warm the house just enough, in a window that widens
+  when it is cold outside.
+- **Remote-sensor control of heat pumps.** Most heat pumps measure temperature at the ceiling
+  unit. Smartmostat steers the unit's own set-point relative to its own reading so it heats to
+  your *room* sensor, pushing harder the further off target the room is.
+- **People win.** Set a temperature and it sticks for 90 minutes, price ignored. Change the
+  device with its own remote and Smartmostat pauses instead of fighting you.
+- **Safe.** A frost guard heats even when Smartmostat is off, missing sensors fall back to
+  sensible behaviour, and the super-expensive shed never acts without a room reading.
 
-## How It Works
+## Requirements
 
-Smartmostat supports two complementary control strategies. Pick the one that matches your hardware—or run multiple instances side by side.
-
-### 1. Tolerance Mode (default)
-
-Ideal for [`generic_thermostat`](https://www.home-assistant.io/integrations/generic_thermostat) style setups with a heater/cooler switch.
-
-- **Target temperature never changes** – your thermostat stays at (say) 20 °C
-- **Dynamic tolerances** expand or shrink based on price
-- **Cheap prices** → small cold tolerance, large hot tolerance → heat sooner, stay warmer
-- **Expensive prices** → large cold tolerance, tiny hot tolerance → wait longer, turn off faster
-- **Average prices** → both tolerances cross at your minimum comfort tolerance
-
-```
-Target: 20 °C        Max tolerance: 2.0 °C        Min tolerance: 0.2 °C
-
-Price position: 0.0 (cheap)   → ON at 20.0 °C · OFF at 22.0 °C  → maximise comfort
-Price position: 0.5 (average) → ON at 19.8 °C · OFF at 20.2 °C  → normal behaviour
-Price position: 1.0 (expensive) → ON at 18.0 °C · OFF at 20.0 °C → save energy
-```
-
-Pre-conditioning kicks in automatically: if an expensive period is less than `lookahead_hours` away Smartmostat turns the heater on even if you are still inside the tolerance band. The room warms while energy is cheap and coasts through the price spike.
-
-### 2. Temperature Mode (set-point control)
-
-Perfect for heat pumps and smart thermostats where you *nudge* the desired temperature rather than flipping a switch—just like the Sam HVAC automation in the prompt.
-
-- Drives the thermostat using a **remote “truth” sensor** (e.g., Aqara probe)
-- Reads the thermostat’s **internal** sensor to calculate offsets
-- Optional **outdoor sensor** influences cooling and fan-only behaviour
-- Applies configurable **heat/cool offsets** to fool the thermostat into heating/cooling sooner or later
-- Supports **fan-only** mode to avoid unnecessary compressor cycles
-
-Cooling branch (simplified):
-```
-if indoor > cool_indoor_threshold OR (outdoor >= cool_outdoor_threshold AND indoor > cool_indoor_min):
-    if enable_fan_only AND indoor > desired + tolerance AND outdoor < desired:
-        hvac_mode = FAN_ONLY
-        target = internal_temp + cool_offset
-    else:
-        hvac_mode = COOL
-        target = internal_temp + (cool_offset if indoor > desired + tolerance else 0)
-```
-
-Heating branch mirrors the logic with `heat_offset`, `base_stop_heat_offset`, and `max_stop_heat_offset`, just like the Sam script. All thresholds are configurable from the UI.
+- Home Assistant 2025.10 or newer.
+- A price sensor with `raw_today` / `raw_tomorrow` (or `today` / `tomorrow`) attributes: the
+  [HACS Nordpool](https://github.com/custom-components/nordpool) integration. The built-in
+  Nord Pool integration does not expose these attributes. 15-minute and hourly prices both
+  work; zero and negative prices are handled.
+- Something to control: a `climate` entity, or a heater/cooler `switch`, `input_boolean` or
+  `fan`.
 
 ## Installation
 
-### HACS (Recommended)
+**HACS:** add `https://github.com/Vortitron/Smartmostat` as a custom repository (type
+*Integration*), install **Smartmostat**, restart Home Assistant.
 
-1. Ensure [HACS](https://hacs.xyz/) is installed
-2. Go to HACS → Integrations
-3. Click the three dots in the top right → Custom repositories
-4. Add repository URL: `https://github.com/vortitron/smartmostat`
-5. Category: Integration
-6. Click "Add"
-7. Search for "Smart Thermostat" and install
-8. Restart Home Assistant
+**Manual:** copy `custom_components/smartmostat` into your `config/custom_components/`
+folder and restart.
 
-### Manual Installation
+Then go to **Settings > Devices & services > Add integration > Smartmostat**.
 
-1. Download the latest release
-2. Copy `custom_components/smartmostat` to your Home Assistant's `custom_components` directory
-3. Restart Home Assistant
+> Upgrading from 0.1.0 or 0.2.0? Entries are migrated automatically and keep their entity
+> ids. Back up first: a migrated entry cannot be loaded by the older versions. See
+> [Upgrading](#upgrading-from-010-or-020).
 
-## Configuration
+## Choosing a control mode
 
-### Through the UI (Recommended)
+| Mode | Use it for | What Smartmostat sends |
+|---|---|---|
+| **Remote sensor** | Heat pumps and air conditioners whose own sensor is in the wrong place | Mode and a set-point computed from the unit's own reading, so it heats to the room sensor |
+| **Set-point** | Any thermostat that measures the room well itself (radiator valves, underfloor) | The control target as its set-point while the device heats. It switches the device to heat only from off; a device someone put in cool, auto or another mode is left alone |
+| **Switch** | A heater or cooler on a relay, smart plug or `input_boolean` | On and off with hysteresis around the control target |
 
-1. Go to Settings → Devices & Services
-2. Click "+ Add Integration"
-3. Search for "Smart Thermostat"
-4. Fill in the configuration:
+Everything else (price logic, schedule, presets, overrides and safety) is the same in all
+three modes.
 
-#### Common Settings
+## Setting up: a heat pump with a remote sensor
 
-- **Name** – Friendly name shown in Home Assistant
-- **Control Strategy** – `Tolerance (switch)` or `Temperature (set-point)`
-- **Primary Temperature Sensor** – The “truth” sensor you trust (required)
-- **Indoor/Outdoor Sensors** – Optional extras for advanced logic
-- **Electricity Price Sensor** – Nordpool sensor (must be from HACS)
-- **Look-ahead Hours** – How far ahead to scan for expensive periods
-- **Pre-conditioning** – Enable to warm/cool before price spikes
-- **Diagnostic Logging** – Enable detailed metrics and analytics events
+This is the set-up Smartmostat was built for: a Panasonic heat pump `climate.sam` in the
+living room, a living-room temperature sensor, an outdoor sensor and the SE4 Nordpool sensor.
 
-#### Tolerance Mode Extras (Switch Control)
+1. **Name and mode:** `Living room`, *Remote sensor*.
+2. **Device and sensors:**
+   - Climate device: `climate.sam`
+   - Room temperature sensors: `sensor.living_room_temperature` (add more in order of
+     preference; *Minimum* or *Mean* combine them)
+   - Device internal sensor: leave empty to use the unit's own `current_temperature`
+   - Outdoor temperature sensor: `sensor.outdoor_temperature`
+3. **Price sensor:** `sensor.nordpool_kwh_se4_sek_3_10_025` (pre-filled when found).
+4. **Comfort:** comfort 20 °C, eco 16 °C, comfort period 19:00 to 23:00, away 10 °C.
 
-Designed for heaters/AC units you can toggle on/off.
+Then, in **Configure** (the options menu), the settings that matter for this unit:
 
-- **Heater Switch** – Entity to turn on/off for heating (required unless cooling only)
-- **Cooler Switch** – Entity for cooling control
-- **Max / Min Tolerance** – Comfort envelope that expands with price
+| Menu | Option | Value | Why |
+|---|---|---|---|
+| Comfort | Device preset while away | `heat_8_15` | Panasonic units refuse set-points below 16 °C unless this preset is on |
+| Device control | Fallback offset | `2` | The ceiling sensor reads warm; without a room reading the unit runs as its own thermostat at target + 2 |
+| Device control | How to stop heating | Automatic | Uses `fan_only` when the unit has it |
+| Price | Super-expensive price | e.g. `4.0` | Optional: switch off in extreme price spikes, only if the room is above 19 °C |
+| Advanced | Weather entity | `weather.home` | Enables the hot-day morning skip |
+| Advanced | Heat loss rate k / heating rate h from entity | `input_number.house_heat_loss_k` / `input_number.house_heat_rate` | Optional: lets an existing thermal model skip pre-warming when the house will reach comfort in time anyway |
 
-#### Temperature Mode Extras (Set-point Control)
+What you get:
 
-Use this for smart thermostats and heat pumps (Sam HVAC style).
+- `climate.living_room`: the thermostat you use. Its target is the base target (16 °C in the
+  day, 20 °C in the evening); its current temperature is the room sensor.
+- `sensor.living_room_control_target`: the price-adjusted target.
+- `sensor.living_room_headline`: a one-line summary such as `Pre-warm to 22°C · Heating`,
+  `Electricity expensive · Warm enough` or `Frost guard · Heating`. Its `status` attribute
+  holds the full working: mode and set-point sent, targets, readings, price signals and the
+  pre-warm calculation.
+- `sensor.living_room_reason`: a fixed key (`prewarm`, `cheap_boost`, `expensive`,
+  `override`, ...) for automations.
+- `sensor.living_room_price_level`, `sensor.living_room_price_position`,
+  `sensor.living_room_override_until` and `switch.living_room_price_optimisation`.
 
-- **Thermostat to Control** – Climate entity receiving nudged set-points
-- **Heat/Cool Offsets** – How much to nudge when remote temp deviates
-- **Stop-heat Offsets** – How aggressively to back off once warmed
-- **Fan-only Thresholds** – Automatically switch to fan-only to save energy
-- **HVAC Mode Changes** – Allow Smartmostat to change HVAC modes, or keep current
+## How it decides
 
-### Configuration Examples
+### Base target
 
-- **Tolerance Mode – Radiator with Shelly switch**
-  - Remote sensor: `sensor.living_room_ecowitt`
-  - Heater switch: `switch.living_room_radiator`
-  - Price sensor: `sensor.nordpool_kwh_no2_nok`
-  - Max tolerance 2.5 °C · Min tolerance 0.2 °C · Look-ahead 3h
+First match wins:
 
-- **Temperature Mode – Heat pump (Sam style)**
-  - Remote sensor: `sensor.t_h_sensor_temperature`
-  - Internal sensor: `sensor.sam_inside_temperature`
-  - Outdoor sensor: `sensor.sam_outside_temperature`
-  - Thermostat: `climate.sam`
-  - Heat offset 1.0 °C · Cool offset −1.0 °C · Fan-only diff 3 °C
+1. **Away** preset: the away temperature.
+2. **Override** active: what you set.
+3. **Comfort** or **Eco** preset: the comfort or eco temperature.
+4. **Schedule** (preset shown as *Schedule*): comfort inside the comfort period, eco outside.
+   Without a comfort period the comfort temperature applies all day.
 
-### Multiple Thermostats
+### Control target
 
-Add as many instances as you like—one per zone, thermostat, or heater. Each can run a different strategy with custom thresholds.
+First match wins, and each row sets the reason you see in the headline:
 
-## Nordpool Integration
+| # | When | Control target |
+|---|---|---|
+| 1 | Away | Away temperature |
+| 2 | Override active | Your temperature, price ignored |
+| 3 | Price optimisation off, or no usable price data | Base |
+| 4 | Inside the comfort period | Base, raised to comfort if the room is more than 1 °C short. No boost, no cut |
+| 5 | Cheap, in the pre-warm window, room below comfort - 1 | Pre-warm target (below) |
+| 6 | Cheap | Base + cheap boost (3 °C), unless the room is already within 0.5 °C of that |
+| 7 | Expensive | Base - expensive cut (2 °C), never below the eco temperature |
+| 8 | Otherwise | Base |
 
-⚠️ **IMPORTANT**: This integration requires the **[HACS Nordpool](https://github.com/custom-components/nordpool) custom component**, NOT the built-in Home Assistant Nordpool integration!
+**Cheap** = cheaper than the average of the next *look-ahead* hours (4) **and** genuinely
+cheap: at most *cheap ratio* (0.5) times today's average, or in the cheapest *cheap
+percentile* (48 %) of today's hours. **Expensive** = dearer than the next hours **and** at
+least *expensive ratio* (1.0) times today's average. Prices are averaged per clock hour so
+15-minute jitter does not flip decisions, and today's average is computed from the slots
+(Nordpool's own `average` attribute can differ).
 
-### Why HACS Nordpool?
+**Pre-warm window:** the *pre-warm hours* (4) before the comfort period starts, or 6 hours
+when it is below 10 °C outside. Never outside that window. The target is sized to the
+deficit: `floor + 2 + 2 × (floor - room)` with `floor = comfort - 1`, kept between comfort
+and the maximum target (25 °C). With a thermal model (k and h) the pre-warm is skipped when
+the house is on track to reach comfort in time anyway.
 
-The built-in HA `nordpool` integration doesn't provide the required hourly price data attributes (`raw_today`, `raw_tomorrow`). You **must** use the HACS custom component.
+**Hot-day morning:** with a weather entity, no cheap heating before 12:00 when today's
+forecast maximum is above 25 °C, unless the room is below the eco temperature or it is
+below 5 °C outside.
 
-### Setting up Nordpool
+### Remote-sensor mode: what the heat pump is told
 
-1. Install Nordpool via HACS
-2. Configure your region (e.g., NO1, NO2, SE1, DK1)
-3. Wait for prices to populate (available around 13:00 CET daily)
-4. Use the Nordpool sensor in Smart Thermostat configuration
+`D` is the control target, `R` the room temperature and `I` the unit's own reading.
 
-### Which Nordpool Sensor to Choose?
+| When | Mode | Set-point |
+|---|---|---|
+| No room reading | heat | `D` + fallback offset (the unit is its own thermostat) |
+| Any room sensor at or above the room ceiling (27 °C) | idle | `I - 5` |
+| `R > D` (overheat guard) | idle | `I` pulled down by 2 °C plus the overshoot, at most 5 °C |
+| `R < D - 0.5` and it is milder outside than `D` | idle (coasting) | `I + max(1, D - R)` |
+| `R < D - 0.5` | heat | `I + max(1, D - R)`: works harder the further off target |
+| `R = D` | heat | `I - 2` |
+| otherwise | heat | `I` |
 
-**⚠️ Important**: Select the **main Nordpool sensor**, NOT the "Next Price" sensor!
+*Idle* means `fan_only` where the unit has it, otherwise heat at the unit's minimum
+set-point (or *off*, if you choose that). Set-points are rounded to the unit's step and kept
+inside its range, and nothing is sent when the unit already reports the same thing.
 
-The main sensor is typically named like:
-- `sensor.nordpool_kwh_no1_nok` (Norway region 1, NOK currency)
-- `sensor.nordpool_kwh_se3_sek` (Sweden region 3, SEK currency)
-- `sensor.nordpool_kwh_dk1_dkk` (Denmark region 1, DKK currency)
+With **cooling** enabled (options, *Cooling*; adds a *Heat/Cool* mode) and at least 22 °C
+outside: fan only from a 25 °C room; the compressor only when it is at least 27 °C both inside
+and out.
 
-**Don't use**:
-- ❌ `sensor.nordpool_next_price` - Only shows next 15 minutes
-- ❌ Any sensor with "next" or "current" in the name
+### Switch mode
 
-### How the Integration Uses Price Data
+On at `D - hysteresis`, off at `D + hysteresis`, with a minimum on/off time (5 minutes). A
+cooler mirrors it in *Cool* mode.
 
-The Smart Thermostat reads from the main Nordpool sensor to get:
+If the room sensor stops reporting, the relay keeps its state for the stale time (3 hours,
+also when staleness is disabled). After that the heater runs 10 minutes in every 30 until a
+reading returns, unless it is warmer outside than the target, in which case it stays off. A
+dead sensor therefore never leaves the heater on, or the room unheated, indefinitely.
 
-1. **Current Price** (sensor state) - Used for immediate decisions
-2. **Average Price** (attribute: `average`) - Baseline for comparison
-3. **Today's Hourly Prices** (attribute: `raw_today`) - Look-ahead analysis
-4. **Tomorrow's Hourly Prices** (attribute: `raw_tomorrow`) - Extended forecasting
+## Overrides and changes on the device
 
-The integration automatically:
-- ✅ Analyses the **current** price vs. average
-- ✅ Looks **several hours ahead** to detect upcoming expensive periods
-- ✅ Calculates the **direction and magnitude** of price changes
-- ✅ Pre-heats/pre-cools before price spikes to build thermal mass
+- Setting the temperature of the Smartmostat thermostat while a comfort period is configured
+  (or a preset other than *Schedule* is active) creates an **override** for *override length* (90 minutes): price is ignored until it
+  expires. Choosing a preset clears it. `smartmostat.set_override` sets one for any length;
+  `smartmostat.clear_override` ends it.
+- Without a comfort period, setting the temperature simply changes the comfort temperature
+  (like any thermostat) and price logic carries on.
+- If someone changes the **device itself** (its remote or app), Smartmostat **pauses** for the
+  override length instead of overwriting them. `smartmostat.resume` ends the pause early. If
+  the device is switched **off** by hand, Smartmostat turns itself off too; turn it back on to
+  resume. A report that matches something Smartmostat itself sent in the last 15 minutes
+  counts as its own command arriving late (slow cloud integrations), not as a person.
 
-**Example**: If it's 10:00 and prices will spike at 14:00, the integration will start pre-heating at 12:00 (with 2-hour look-ahead), even though current prices are normal.
+## Safety
 
-### Price Analysis Example
+- **Frost guard:** below the frost temperature (5 °C) Smartmostat heats to at least 8 °C,
+  even when it is switched off, paused or shedding, and raises a repair notice if it was off.
+- **No readings while it is cold:** with no room or device reading and below 3 °C outside,
+  climate devices heat at the control target; switches run 10 minutes in every 30 (see
+  [Switch mode](#switch-mode) for milder weather).
+- **Super-expensive shed** (optional): turns the device off above a price you set, but only
+  with a room reading above 19 °C. An override or the away preset beats it.
+- **Stale sensors:** a sensor silent for 3 hours counts as unavailable.
+- **Gentle:** at most one automatic command per device per minute; unloading the integration
+  leaves the device as it is.
 
-```
-Time:     10:00  11:00  12:00  13:00  14:00  15:00  16:00
-Price:    1.0    1.1    1.2    1.5    2.0    2.2    1.8   (NOK/kWh)
-Average:  1.5 NOK/kWh
-Threshold High: 1.8 NOK/kWh (1.2 × average)
+## Services
 
-Action at 12:00:
-├─ Current price: 1.2 NOK/kWh (below threshold, normal)
-├─ Looking ahead: Detects spike at 14:00-16:00 (above 1.8)
-├─ Decision: START PRE-HEATING NOW
-└─ Adjustment: +2.0°C to build thermal mass
+| Service | Fields | Effect |
+|---|---|---|
+| `smartmostat.set_override` | `temperature`, `minutes` (optional) | Hold a temperature, ignoring price |
+| `smartmostat.clear_override` | | Back to the schedule |
+| `smartmostat.resume` | | End a pause caused by a change on the device |
+| `smartmostat.evaluate` | | Re-run now; returns the full decision (use *Return response* in Developer tools) |
 
-Action at 14:00:
-├─ Current price: 2.0 NOK/kWh (high!)
-├─ Already pre-heated, so home is warm
-├─ Decision: REDUCE HEATING
-└─ Adjustment: -1.5°C to save money
-```
+Standard `climate.set_temperature`, `set_hvac_mode`, `set_preset_mode`, `turn_on` and
+`turn_off` work as usual. Each decision change also fires a `smartmostat_decision` event
+(can be turned off in *Safety*).
 
-This way, your home stays comfortable during expensive hours whilst minimising energy costs!
+## Automation examples
 
-**Want more details?** See [PRICE_ANALYSIS.md](PRICE_ANALYSIS.md) for a deep dive into how the price analysis works.
-
-## Entity Attributes
-
-The Smart Thermostat entity provides additional attributes for monitoring:
-
-- `base_temperature`: Your desired temperature (before adjustments)
-- `current_adjustment`: Current temperature adjustment being applied
-- `current_price`: Current electricity price
-- `min_price_24h`: Minimum price in next 24 hours
-- `max_price_24h`: Maximum price in next 24 hours
-- `price_position`: Where current price falls (0 = min, 1 = max)
-- `next_high_price_in_hours`: Hours until next expensive period
-- `next_low_price_in_hours`: Hours until next cheap period
-- `wrapped_climate_entity`: The underlying thermostat being controlled
-
-## Usage Tips
-
-### Optimal Settings
-
-1. **Conservative Start**: Begin with small variance (±1.5°C) and monitor results
-2. **Adjust Based on Comfort**: Increase variance if comfortable, decrease if too variable
-3. **Look-ahead Duration**: 3-4 hours works well for most homes
-4. **Monitor Attributes**: Watch `price_position` and `current_adjustment` to understand behaviour
-5. **Different Rooms**: Use different variance for different rooms (living room: ±2.5°C, bedroom: ±1.5°C)
-
-### Automation Examples
-
-**Disable during manual override:**
 ```yaml
 automation:
-  - alias: "Pause Smart Thermostat when manually adjusted"
-    trigger:
-      - platform: state
-        entity_id: climate.smart_thermostat
-        attribute: current_temperature
-    condition:
-      - condition: template
-        value_template: "{{ trigger.to_state.attributes.base_temperature != trigger.from_state.attributes.base_temperature }}"
-    action:
-      - service: climate.turn_off
+  - alias: "Comfort while the TV is on"
+    triggers:
+      - trigger: state
+        entity_id: media_player.living_room_tv
+        to: "on"
+    actions:
+      - action: climate.set_preset_mode
         target:
-          entity_id: climate.smart_thermostat
-```
-
-**Notification on high adjustments:**
-```yaml
-automation:
-  - alias: "Notify on large temperature adjustment"
-    trigger:
-      - platform: state
-        entity_id: climate.smart_thermostat
-        attribute: current_adjustment
-    condition:
-      - condition: template
-        value_template: "{{ trigger.to_state.attributes.current_adjustment | abs > 2 }}"
-    action:
-      - service: notify.mobile_app
+          entity_id: climate.living_room
         data:
-          message: "Smart Thermostat adjusted by {{ trigger.to_state.attributes.current_adjustment }}°C due to electricity prices"
+          preset_mode: comfort
+
+  - alias: "Back to schedule when the TV goes off"
+    triggers:
+      - trigger: state
+        entity_id: media_player.living_room_tv
+        to: "off"
+        for: "00:15:00"
+    actions:
+      - action: climate.set_preset_mode
+        target:
+          entity_id: climate.living_room
+        data:
+          preset_mode: "none"
+
+  - alias: "Fixed-price tariff: no price logic"
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.on_fixed_price_feed
+    actions:
+      - action: "switch.turn_{{ 'off' if trigger.to_state.state == 'on' else 'on' }}"
+        target:
+          entity_id: switch.living_room_price_optimisation
+
+  - alias: "Circulation fan follows the heat pump"
+    triggers:
+      - trigger: state
+        entity_id: sensor.living_room_headline
+    actions:
+      - action: "switch.turn_{{ 'on' if 'Heating' in states('sensor.living_room_headline') else 'off' }}"
+        target:
+          entity_id: switch.circulation_fan
 ```
 
-## Frequently Asked Questions
+## Moving Sam to Smartmostat
 
-### Which Nordpool sensor should I use?
+For the owner's own set-up, each helper in the old YAML maps to an option:
 
-Use the **main regional sensor** that contains all hourly prices:
+| Old helper or rule | Smartmostat |
+|---|---|
+| `input_number.sam_desired_temperature` | `climate.living_room` target (the base target) |
+| `input_number.sam_control_temperature` | `sensor.living_room_control_target` |
+| `sam_hvac_headline` / `sam_hvac_status` | `sensor.living_room_headline` and its `status` attribute |
+| `input_datetime.sam_desired_lock_until` (90-minute lock) | Override length option; `sensor.living_room_override_until` |
+| `input_boolean.holiday_mode` and `heat_8_15` | *Away* preset; *Device preset while away* = `heat_8_15` |
+| Evening 19:00 to 23:00 at 20 °C, 16 °C otherwise | Comfort period, comfort 20, eco 16 |
+| `prewarm_max` 25, window 15:00 (13:00 when < 10 °C) | Maximum target 25, pre-warm window 4 h / 6 h, cold outdoor 10 |
+| `cheap_leccy` (50 %) and rank ≤ 11 | Cheap ratio 0.5, cheap percentile 0.48 |
+| `price_genuinely_expensive` (≥ average) | Expensive ratio 1.0 |
+| Cheap boost +3, skip within 0.5 | Cheap boost 3, boost skip margin 0.5 |
+| `heat_room_max` 27, `heat_fallback_offset` 2 | Room ceiling 27, fallback offset 2 |
+| `forecast_today_max` > 25 before 12:00 | Weather entity, hot day maximum 25, morning ends 12:00 |
+| `HouseThermalModel.yaml` k and h | *Heat loss rate k / heating rate h from entity* |
+| `SuperExpensive.yaml` | Super-expensive price, release margin, shed floor 19 |
+| `min(living, bedroom)` while the fan runs | Two room sensors, combined with *Minimum* |
+| TV comfort, fixed-price feed, circulation fan | Small automations (examples above) |
 
-✅ **Correct sensors:**
-- `sensor.nordpool_kwh_no1_nok`
-- `sensor.nordpool_kwh_no2_nok`
-- `sensor.nordpool_kwh_se1_sek`
-- `sensor.nordpool_kwh_dk1_dkk`
-- etc. (pattern: `sensor.nordpool_kwh_<region>_<currency>`)
+Kept in YAML for now: Superchill, cheap pre-cooling, the scorcher override and the cooling
+trend baseline. Leave *Cooling* off in Smartmostat while those automations handle summer.
 
-❌ **Wrong sensors (don't use these):**
-- `sensor.nordpool_next_price` - Only 15 minutes ahead
-- `sensor.nordpool_current_price` - No hourly data
-- Any derivative sensors you've created
+Before switching over, run Smartmostat in **shadow mode** (*Advanced > Dry run*) beside the
+old automations for a couple of days, on a test instance or with the owner's agreement:
+commands are logged instead of sent, so the headline and control target can be compared
+with what the YAML did. In dry run Smartmostat does not watch for changes on the device (the
+old automations are still driving it), so it never pauses or follows the device to off.
 
-**How to verify**: Open Developer Tools → States, find your sensor, and check it has these attributes:
-- `average` ✅
-- `raw_today` ✅
-- `raw_tomorrow` ✅
+## Upgrading from 0.1.0 or 0.2.0
 
-If all three are present, you've got the right sensor!
+| Was | Becomes |
+|---|---|
+| 0.1.0 (wrap a climate, shift its set-point) | *Set-point* mode. `max_increase` becomes the cheap boost, `max_decrease` the expensive cut, the price thresholds the cheap and expensive ratios. The comfort temperature is your own setting from the old thermostat (its `base_temperature`, not the price-shifted target) |
+| 0.2.0 *temperature* mode | *Remote sensor* mode with the same offsets. The old default cooling rule (26 °C inside / 25 °C outside) is replaced by the safer 27 / 27 rule and cooling starts switched off; customised cooling thresholds are kept and cooling stays on |
+| 0.2.0 *tolerance* mode | *Switch* mode. Minimum and maximum tolerance `a` and `b` become hysteresis `(a + b) / 2` and boost/cut `(b - a) / 2`, which gives exactly the same on and off temperatures at the cheapest and dearest prices |
 
-**Need help checking?** Use the validation helper in `check_nordpool_sensor.yaml` - it will tell you if your sensor is correct!
+Entity ids, unique ids and history are kept.
 
-## Diagnostics & Metrics
-
-Enable **diagnostic logging** when configuring the integration to capture rich analytics:
-
-- Smartmostat fires a `smartmostat_metrics` event after every control decision.
-- Payloads include remote/internal/outdoor temperatures, the commanded HVAC mode, price data, and tolerance/offset information.
-- Use a Home Assistant automation to persist these events to the recorder, InfluxDB, or your own data pipeline for deeper analysis.
-
-This telemetry is perfect for estimating heating and cooling coefficients, modelling heat retention, and planning forecast-driven heating schedules.
-
-### Does it look ahead or just react to current prices?
-
-**Both!** The integration is intelligent:
-
-1. **Reacts to current high prices** - Reduces heating immediately when prices spike
-2. **Looks ahead 2+ hours** - Detects upcoming expensive periods
-3. **Pre-heats proactively** - Warms your home before prices spike
-4. **Uses tomorrow's data** - When available (after ~13:00 CET), extends look-ahead to 24+ hours
-
-### How much look-ahead time?
-
-- **Configurable**: Set "Pre-heating Look-ahead" (default: 2 hours)
-- **Data available**: Up to 24+ hours when tomorrow's prices are published
-- **Practical range**: 1-4 hours works best for most homes
-
-Example with 3-hour look-ahead:
-- At 09:00, can detect expensive period at 12:00
-- At 11:00, can detect expensive period at 14:00
-- After 13:00 (when tomorrow's prices arrive), can detect tomorrow's peaks
+0.1.0 and 0.2.0 offered the device's own modes. If the old thermostat was in a mode the new
+entry does not offer (for example *Cool* on a set-point entry, or on a remote-sensor entry
+with cooling off), Smartmostat starts **off** and leaves the device exactly as it is, with a
+repair notice. Turn Smartmostat on when you want it to take control again.
 
 ## Troubleshooting
 
-### Integration not appearing
-- Ensure you've restarted Home Assistant after installation
-- Check `custom_components/smartmostat/` exists and contains all files
+- **Reason is `no_price`:** check that the price sensor has a `raw_today` attribute in
+  *Developer tools > States*. The built-in Nord Pool integration does not provide it.
+- **The heat pump does not follow the room:** look at the headline sensor's `status`
+  attribute: it shows the set-point sent, `R` and its source, `I`, `O`, the boost and any
+  guards. `smartmostat.evaluate` returns the same as a service response.
+- **Paused:** someone changed the device itself. Wait, or call `smartmostat.resume`.
+- **Debug logging:**
 
-### Price adjustments not working
-- Verify your price sensor is working and has the `average` attribute
-- Check the Smart Thermostat entity attributes for `current_price` and `average_price`
-- Enable debug logging (see below)
+  ```yaml
+  logger:
+    logs:
+      custom_components.smartmostat: debug
+  ```
 
-### Temperature not changing
-- Ensure your wrapped climate entity supports temperature changes
-- Check Home Assistant logs for errors
-- Verify the wrapped climate entity is responding to manual changes
+- **Diagnostics:** *Settings > Devices & services > Smartmostat > ... > Download
+  diagnostics* includes the last decision.
 
-### Debug Logging
+## Development
 
-Add to `configuration.yaml`:
-```yaml
-logger:
-  default: info
-  logs:
-    custom_components.smartmostat: debug
-```
-
-## Energy Savings
-
-Typical savings depend on:
-- Your electricity price volatility
-- Home insulation quality
-- Configured adjustment parameters
-- Local climate
-
-**Expected results:**
-- Well-insulated homes: 10-20% heating cost reduction
-- Average insulation: 5-15% reduction
-- Best results with high price volatility (Nordic/Baltic regions)
-
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with appropriate tests
-4. Submit a pull request
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/SPEC.md](docs/SPEC.md) (the design this
+release implements). Older design notes live in [docs/history](docs/history/).
 
 ## Licence
 
-This project is licenced under the MIT Licence - see the [LICENSE](LICENSE) file for details.
-
-## Credits
-
-- Inspired by the [generic_thermostat](https://www.home-assistant.io/integrations/generic_thermostat) integration
-- Designed for use with [Nordpool](https://github.com/custom-components/nordpool) integration
-- Built for the Home Assistant community
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/vortitron/smartmostat/issues)
-- **Discussions**: [Home Assistant Community](https://community.home-assistant.io/)
-- **Documentation**: [GitHub Wiki](https://github.com/vortitron/smartmostat/wiki)
-
-## Roadmap
-
-- [ ] Support for multiple price zones
-- [ ] Advanced scheduling integration
-- [ ] Machine learning for optimal adjustment prediction
-- [ ] Energy dashboard integration
-- [ ] Multi-room coordination
-- [ ] Cost savings tracking and reporting
+MIT. See [LICENSE](LICENSE).

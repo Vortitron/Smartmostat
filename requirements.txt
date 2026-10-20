@@ -1,3 +1,1 @@
-# Home Assistant requirements
-# This integration has no external dependencies beyond Home Assistant core
-
+# Smartmostat has no runtime requirements beyond Home Assistant itself.

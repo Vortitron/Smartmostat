@@ -1,2 +1,356 @@
 {
-	"config": {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smartmostat",
+        "description": "Price-aware control for a heat pump, thermostat or heater. Needs a price sensor with raw_today/raw_tomorrow attributes (the HACS Nordpool integration, not the built-in one).",
+        "data": {
+          "name": "Name",
+          "control_mode": "Control mode"
+        },
+        "data_description": {
+          "name": "Used for the entity names, for example climate.living_room.",
+          "control_mode": "Remote sensor: steer a heat pump through its own reading so it heats to a room sensor. Set-point: tell any thermostat the price-adjusted target. Switch: turn a heater or cooler relay on and off."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Smartmostat",
+        "description": "Change the control mode, device, sensors or price sensor. Options are kept.",
+        "data": {
+          "control_mode": "Control mode"
+        }
+      },
+      "devices": {
+        "title": "Device and sensors",
+        "description": "Choose what Smartmostat controls and which sensors it reads.",
+        "data": {
+          "target_climate": "Climate device",
+          "heater": "Heater",
+          "cooler": "Cooler",
+          "room_sensors": "Room temperature sensors",
+          "room_aggregate": "Combine room sensors",
+          "internal_sensor": "Device internal sensor",
+          "outdoor_sensor": "Outdoor temperature sensor"
+        },
+        "data_description": {
+          "target_climate": "The real heat pump, air conditioner or thermostat.",
+          "heater": "A switch, input_boolean or fan that heats.",
+          "cooler": "A switch, input_boolean or fan that cools.",
+          "room_sensors": "In order of preference. Remote-sensor and switch modes need at least one.",
+          "room_aggregate": "First available uses the first working sensor; minimum and mean use all working sensors.",
+          "internal_sensor": "Optional. Overrides the device's own current_temperature.",
+          "outdoor_sensor": "Optional. Used for cold-weather pre-warming, mild coasting, cooling and the no-reading fallback."
+        }
+      },
+      "price": {
+        "title": "Price sensor",
+        "description": "A HACS Nordpool sensor (or any sensor with raw_today/raw_tomorrow or today/tomorrow price lists). 15-minute and hourly prices both work.",
+        "data": {
+          "price_sensor": "Price sensor"
+        }
+      },
+      "comfort": {
+        "title": "Comfort",
+        "description": "Base temperatures and an optional daily comfort period. Pre-warming on cheap power only happens before a comfort period. {price_note}",
+        "data": {
+          "comfort_temperature": "Comfort temperature",
+          "eco_temperature": "Eco temperature",
+          "comfort_start": "Comfort period start",
+          "comfort_end": "Comfort period end",
+          "away_temperature": "Away temperature"
+        },
+        "data_description": {
+          "eco_temperature": "Target outside the comfort period. Leave empty for comfort all day.",
+          "comfort_start": "Leave both times empty for no schedule."
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Entity not found.",
+      "invalid_price_sensor": "No price slots found. Use the HACS Nordpool integration, which provides raw_today and raw_tomorrow.",
+      "need_heater_or_cooler": "Choose a heater, a cooler or both.",
+      "room_sensor_required": "Choose at least one room temperature sensor.",
+      "already_controlled": "Another Smartmostat entry already controls this device.",
+      "schedule_incomplete": "Set both the start and the end of the comfort period, or neither.",
+      "min_above_max": "The minimum target must be below the maximum target."
+    },
+    "abort": {
+      "already_controlled": "Another Smartmostat entry already controls this device. Two controllers on one device fight each other.",
+      "reconfigure_successful": "Smartmostat was reconfigured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smartmostat options",
+        "menu_options": {
+          "comfort": "Comfort and schedule",
+          "price": "Price behaviour",
+          "actuator": "Device control",
+          "cooling": "Cooling",
+          "safety": "Safety",
+          "advanced": "Advanced"
+        }
+      },
+      "comfort": {
+        "title": "Comfort and schedule",
+        "data": {
+          "comfort_temperature": "Comfort temperature",
+          "eco_temperature": "Eco temperature",
+          "comfort_start": "Comfort period start",
+          "comfort_end": "Comfort period end",
+          "away_temperature": "Away temperature",
+          "override_minutes": "Override length",
+          "away_device_preset": "Device preset while away",
+          "min_target": "Minimum target",
+          "max_target": "Maximum target"
+        },
+        "data_description": {
+          "eco_temperature": "Target outside the comfort period. Empty means comfort all day.",
+          "override_minutes": "How long a manual change sticks (price ignored). 0 means until the next schedule change.",
+          "away_device_preset": "Optional device preset to set while away, for example heat_8_15 on Panasonic units whose normal minimum is 16 °C.",
+          "max_target": "No control target (including pre-warm) goes above this."
+        }
+      },
+      "price": {
+        "title": "Price behaviour",
+        "data": {
+          "price_optimisation": "Price optimisation",
+          "lookahead_hours": "Look-ahead hours",
+          "relative_margin": "Relative margin",
+          "cheap_ratio": "Cheap ratio",
+          "cheap_percentile": "Cheap percentile",
+          "expensive_ratio": "Expensive ratio",
+          "cheap_boost": "Cheap boost",
+          "boost_skip_margin": "Boost skip margin",
+          "expensive_cut": "Expensive cut",
+          "prewarm_hours": "Pre-warm window",
+          "prewarm_hours_cold": "Pre-warm window when cold",
+          "cold_outdoor": "Cold outdoor temperature",
+          "hot_day_max": "Hot day forecast maximum",
+          "morning_end": "Morning ends",
+          "shed_price": "Super-expensive price",
+          "shed_hysteresis": "Super-expensive release margin",
+          "shed_floor": "Shed only above room temperature"
+        },
+        "data_description": {
+          "lookahead_hours": "Cheap means cheaper than the average of this many coming hours (and genuinely cheap, see below).",
+          "relative_margin": "Dead band for the relative test, in the price sensor's unit.",
+          "cheap_ratio": "Genuinely cheap when at or below this fraction of today's average.",
+          "cheap_percentile": "Or when the hour ranks at or below this point of today's hours (0 cheapest, 1 dearest).",
+          "expensive_ratio": "Expensive needs the price at or above this multiple of today's average.",
+          "boost_skip_margin": "Skip the boost when the room is already within this of the boosted value. Negative disables the skip.",
+          "expensive_cut": "Lower the target by this when expensive, never below the eco temperature.",
+          "prewarm_hours": "Pre-warm on cheap power only in this many hours before the comfort period.",
+          "hot_day_max": "With a weather entity: no cheap heating before the end of the morning when the forecast maximum is above this.",
+          "shed_price": "Turn the device off above this price (with a room reading above the shed floor). Empty disables shedding."
+        }
+      },
+      "actuator": {
+        "title": "Device control",
+        "data": {
+          "temperature_tolerance": "Tolerance below target",
+          "heat_offset": "Minimum heating push",
+          "base_stop_heat_offset": "Stop-heat offset",
+          "max_stop_heat_offset": "Maximum stop-heat offset",
+          "room_max": "Room ceiling",
+          "fan_only_difference": "Off only when this far over target",
+          "idle_mode": "How to stop heating",
+          "fallback_offset": "Fallback offset",
+          "allow_hvac_mode_changes": "Allow mode changes",
+          "hysteresis": "Hysteresis",
+          "min_cycle_minutes": "Minimum on/off time"
+        },
+        "data_description": {
+          "heat_offset": "When heating, ask for at least this much above the device's own reading. Further from target it asks for more.",
+          "room_max": "Above this room temperature the device idles whatever the target.",
+          "fan_only_difference": "Only used when stopping means switching the device off.",
+          "fallback_offset": "With no room reading the device heats as its own thermostat at the target plus this.",
+          "allow_hvac_mode_changes": "When off, only set-points are sent.",
+          "hysteresis": "On at target minus this, off at target plus this."
+        }
+      },
+      "cooling": {
+        "title": "Cooling",
+        "data": {
+          "cooling": "Enable cooling",
+          "cool_fan_room": "Fan-only cooling from room temperature",
+          "cool_outdoor_gate": "Cooling only above outdoor temperature",
+          "cool_compressor_room": "Compressor from room temperature",
+          "cool_compressor_outdoor": "Compressor from outdoor temperature",
+          "cool_offset": "Cooling offset"
+        },
+        "data_description": {
+          "cooling": "Adds a Heat/Cool mode. The compressor only runs when it is hot both inside and out."
+        }
+      },
+      "safety": {
+        "title": "Safety",
+        "data": {
+          "frost_protection": "Frost protection",
+          "frost_temperature": "Frost temperature",
+          "stale_minutes": "Stale sensor after",
+          "diagnostic_events": "Fire decision events"
+        },
+        "data_description": {
+          "frost_protection": "Heats below the frost temperature even when Smartmostat is off.",
+          "stale_minutes": "A sensor that has not reported for this long counts as unavailable. 0 disables."
+        }
+      },
+      "advanced": {
+        "title": "Advanced",
+        "data": {
+          "weather_entity": "Weather entity",
+          "forecast_hours": "Forecast hours",
+          "thermal_k": "Heat loss rate k",
+          "thermal_k_entity": "Heat loss rate k from entity",
+          "thermal_h": "Heating rate h",
+          "thermal_h_entity": "Heating rate h from entity",
+          "dry_run": "Dry run"
+        },
+        "data_description": {
+          "weather_entity": "For today's forecast maximum and the mean of the next forecast hours.",
+          "thermal_k": "Per hour. With h and an outdoor reading, pre-warming is skipped when the house is on track to reach comfort in time.",
+          "thermal_h": "°C per hour of heating.",
+          "dry_run": "Log commands without sending them (shadow mode)."
+        }
+      }
+    },
+    "error": {
+      "schedule_incomplete": "Set both the start and the end of the comfort period, or neither.",
+      "min_above_max": "The minimum target must be below the maximum target."
+    }
+  },
+  "selector": {
+    "control_mode": {
+      "options": {
+        "remote_sensor": "Remote sensor (heat pump / AC)",
+        "setpoint": "Set-point (any thermostat)",
+        "switch": "Switch (heater / cooler relay)"
+      }
+    },
+    "room_aggregate": {
+      "options": {
+        "first_available": "First available",
+        "min": "Minimum",
+        "mean": "Mean"
+      }
+    },
+    "idle_mode": {
+      "options": {
+        "auto": "Automatic (fan only if supported)",
+        "fan_only": "Fan only",
+        "heat_low": "Heat at the device minimum",
+        "off": "Off"
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "smartmostat": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Schedule",
+              "comfort": "Comfort",
+              "eco": "Eco",
+              "away": "Away"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "control_target": {
+        "name": "Control target"
+      },
+      "headline": {
+        "name": "Headline"
+      },
+      "reason": {
+        "name": "Reason",
+        "state": {
+          "away": "Away",
+          "override": "Manual override",
+          "paused": "Paused",
+          "no_price": "No price data",
+          "price_off": "Price control off",
+          "comfort": "Comfort",
+          "comfort_hold": "Comfort hold",
+          "prewarm": "Pre-warm",
+          "cheap_boost": "Cheap power boost",
+          "hot_day": "Hot day",
+          "expensive": "Expensive",
+          "shed": "Super-expensive shed",
+          "economy": "Economy",
+          "frost": "Frost guard",
+          "fallback": "No readings fallback",
+          "off": "Off"
+        }
+      },
+      "price_level": {
+        "name": "Price level",
+        "state": {
+          "cheap": "Cheap",
+          "normal": "Normal",
+          "expensive": "Expensive",
+          "super_expensive": "Super-expensive",
+          "unknown": "Unknown"
+        }
+      },
+      "price_position": {
+        "name": "Price position"
+      },
+      "override_until": {
+        "name": "Override until"
+      }
+    },
+    "switch": {
+      "price_optimisation": {
+        "name": "Price optimisation"
+      }
+    }
+  },
+  "services": {
+    "set_override": {
+      "name": "Set override",
+      "description": "Hold a temperature for a while, ignoring price.",
+      "fields": {
+        "temperature": {
+          "name": "Temperature",
+          "description": "Target to hold."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "How long. Defaults to the override length option; 0 means until the next schedule change."
+        }
+      }
+    },
+    "clear_override": {
+      "name": "Clear override",
+      "description": "Go back to the schedule now."
+    },
+    "resume": {
+      "name": "Resume",
+      "description": "End a pause caused by a change made on the device itself."
+    },
+    "evaluate": {
+      "name": "Evaluate",
+      "description": "Re-run the decision now and return it."
+    }
+  },
+  "issues": {
+    "frost_while_off": {
+      "title": "{name}: frost guard is heating",
+      "description": "{name} is switched off but the temperature fell below the frost temperature, so Smartmostat is heating anyway. This clears itself once the room is warm again. Turn off frost protection in the options if this is not wanted."
+    },
+    "no_readings": {
+      "title": "{name}: no temperature readings",
+      "description": "{name} has no usable room or device temperature while heat may be needed, so it is heating on a safety fallback. Check the temperature sensors."
+    },
+    "restored_mode_unsupported": {
+      "title": "{name}: not controlling the device after the upgrade",
+      "description": "Before the upgrade, {name} was in {mode}, a mode this entry does not offer. To avoid changing a working device, {name} started switched off and is leaving the device alone (the frost guard still applies). Turn {name} on to let it take control again, or reconfigure it with a mode that suits the device."
+    }
+  }
+}
